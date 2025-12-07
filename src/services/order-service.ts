@@ -121,16 +121,16 @@ export class OrderService {
    */
   async getOrderStatus(orderId: string): Promise<{
     found: boolean;
-    status?: string;
-    order?: Order;
-    error?: string;
+    status?: string | undefined;
+    order?: Order | undefined;
+    error?: string | undefined;
   }> {
     const response = await ordersApi.getById(orderId);
 
     if (!response.ok) {
       return {
         found: false,
-        error: response.error,
+        error: response.error ?? "Unknown error",
       };
     }
 
