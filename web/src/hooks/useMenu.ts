@@ -10,8 +10,8 @@ export function useMenu() {
     async function fetchMenu() {
       try {
         // In production, call the VPS directly. In dev, use proxy.
-        const apiUrl = import.meta.env.DEV ? "" : "http://191.101.15.236";
-        const res = await fetch(`${apiUrl}/api/menu`);
+        const apiUrl = import.meta.env.DEV ? "/api" : "http://191.101.15.236";
+        const res = await fetch(`${apiUrl}/menu`);
         if (!res.ok) throw new Error("Failed to fetch menu");
         const data = await res.json();
         setMenu(data);
