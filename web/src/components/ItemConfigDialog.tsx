@@ -84,7 +84,7 @@ export function ItemConfigDialog({
             <div className="space-y-3">
               <Label className="text-base font-semibold">Size</Label>
               <div className="flex flex-wrap gap-2">
-                {item.sizes.map((size, idx) => (
+                {item.sizes.map((size) => (
                   <Button
                     key={size.id}
                     variant={
