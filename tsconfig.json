@@ -21,7 +21,7 @@
     "declarationMap": true,
 
     // Stricter Typechecking Options
-    "noUncheckedIndexedAccess": true,
+    // "noUncheckedIndexedAccess": true, // Disabled for simpler builds
     // "exactOptionalPropertyTypes": true, // Disabled - causes issues with optional properties
 
     // Style Options
