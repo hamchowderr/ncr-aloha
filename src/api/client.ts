@@ -9,7 +9,7 @@ interface RequestOptions {
   body?: unknown;
 }
 
-interface ApiResponse<T> {
+export interface ApiResponse<T> {
   ok: boolean;
   status: number;
   data?: T;
