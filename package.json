@@ -1,0 +1,32 @@
+{
+  "name": "ncr-aloha",
+  "version": "1.0.0",
+  "description": "NCR Aloha voice ordering integration",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "test:api": "tsx src/test-api.ts",
+    "server": "tsx src/server.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/crypto-js": "^4.2.2",
+    "cors": "^2.8.5",
+    "crypto-js": "^4.2.0",
+    "dotenv": "^17.2.3",
+    "express": "^4.22.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.10.1"
+  }
+}

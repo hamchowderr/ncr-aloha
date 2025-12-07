@@ -1,0 +1,33 @@
+node_modules/
+dist/
+*.log
+
+# Environment files (contain secrets)
+.env
+.env.*
+pipecat/.env
+pipecat/.env.*
+
+# Postman collections with credentials
+*.postman_collection.json
+sandbox-*.json
+
+# Python
+__pycache__/
+*.pyc
+pipecat/venv/
+pipecat/venv-wsl/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code local files
+.claude/
+
+# Windows temp
+nul

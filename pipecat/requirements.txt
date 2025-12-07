@@ -1,0 +1,19 @@
+# Core Pipecat with service integrations
+# Note: Daily transport requires Linux/macOS - no Windows wheels
+pipecat-ai[openai,deepgram,elevenlabs,silero,websocket]
+
+# Pipecat Flows for structured conversations (optional but recommended)
+pipecat-flows
+
+# HTTP client for order API
+httpx
+
+# Environment variables
+python-dotenv
+
+# Type hints and data validation
+pydantic
+
+# For production deployments (optional):
+# pipecat-ai[daily]  # Daily.co transport - Linux/macOS only
+# pipecat-ai[krisp]  # Krisp noise cancellation - requires license
