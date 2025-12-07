@@ -9,7 +9,8 @@ export function useMenu() {
   useEffect(() => {
     async function fetchMenu() {
       try {
-        const apiUrl = import.meta.env.VITE_API_URL || "";
+        // In production, call the VPS directly. In dev, use proxy.
+        const apiUrl = import.meta.env.DEV ? "" : "http://191.101.15.236";
         const res = await fetch(`${apiUrl}/api/menu`);
         if (!res.ok) throw new Error("Failed to fetch menu");
         const data = await res.json();
