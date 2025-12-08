@@ -84,15 +84,27 @@ bot_processes = {}
 
 ROLE_MESSAGE = {
     "role": "system",
-    "content": """You are a friendly voice ordering assistant for Allstar Wings & Ribs restaurant in Richmond Hill.
+    "content": """You are a friendly, relaxed voice ordering assistant for Allstar Wings & Ribs restaurant in Richmond Hill.
 
-CRITICAL VOICE RULES:
-- NEVER use markdown formatting (no asterisks, no bold, no headers)
-- Keep responses conversational and brief - this is a phone call
-- Speak naturally like a real person taking a phone order
-- Wing sizes are in POUNDS (1, 2, 3, or 5 pounds) - NOT ounces
-- NEVER mention other restaurants. You are Allstar Wings & Ribs.
-- Use the get_menu tool when customers ask about menu items or prices"""
+CONVERSATION STYLE:
+- Speak naturally and warmly, like chatting with a regular customer
+- Use short, simple sentences. Pause between thoughts.
+- Don't rush. Take your time. Be patient.
+- Say "um" or "let me see" occasionally to sound human
+- Respond to what the customer says before moving on
+- If they seem confused, slow down and clarify
+
+CRITICAL RULES:
+- NEVER use markdown formatting (no asterisks, no bold, no lists)
+- Wing sizes are in POUNDS (1, 2, 3, or 5 pounds)
+- NEVER mention other restaurants
+- Use get_menu tool when customers ask about items or prices
+
+EXAMPLE NATURAL RESPONSES:
+- "Got it... two pounds of wings, honey garlic. Anything else?"
+- "Sure thing! And what flavor would you like on those?"
+- "Alright, let me make sure I have this right..."
+- "No problem! Take your time."""
 }
 
 
@@ -157,18 +169,20 @@ class FlowNodeFactory:
             "role_messages": [ROLE_MESSAGE],
             "task_messages": [{
                 "role": "system",
-                "content": """This is a pickup order. The customer just called.
+                "content": """The customer just called. This is a pickup order.
 
-IMMEDIATELY say: "Hi! Thanks for calling Allstar Wings and Ribs! What can I get for you today?"
+WAIT for the greeting to finish, then listen to what they say.
 
 If they ask about the menu, use get_menu to fetch it.
 If they ask about flavors, tell them: Honey Garlic, BBQ, Hot, Mild, Salt and Pepper, Lemon Pepper, Jerk, Suicide, and Cajun.
 If they ask about sizes, wings come in: 1 pound, 2 pounds, 3 pounds, or 5 pounds.
 
-When they say what they want to order, use set_ready_to_order to proceed."""
+When they say what they want to order, use set_ready_to_order to proceed.
+
+Remember: Be patient, don't rush them."""
             }],
             "pre_actions": [
-                {"type": "tts_say", "text": "Hi! Thanks for calling Allstar Wings and Ribs! What can I get for you today?"}
+                {"type": "tts_say", "text": "Hi there! Thanks for calling Allstar Wings and Ribs. What can I get for you?"}
             ],
             "functions": [
                 FlowsFunctionSchema(
@@ -781,11 +795,17 @@ async def websocket_handler(websocket: WebSocket):
             language="en-US",
         )
 
+        # Import Cartesia params for voice control
+        from pipecat.services.cartesia.tts import CartesiaTTSService
+
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id=os.getenv("CARTESIA_VOICE_ID", "79a125e8-cd45-4c13-8a67-188112f4dd22"),
-            model="sonic-english",
+            model="sonic-2024-10-19",  # Use sonic model with speed control
             sample_rate=8000,
+            params=CartesiaTTSService.InputParams(
+                speed="slow",  # Slower, more natural pacing
+            ),
         )
 
         llm = OpenAILLMService(
@@ -811,10 +831,10 @@ async def websocket_handler(websocket: WebSocket):
                 add_wav_header=False,
                 vad_analyzer=SileroVADAnalyzer(
                     params=VADParams(
-                        confidence=0.7,
-                        start_secs=0.2,
-                        stop_secs=0.8,
-                        min_volume=0.6,
+                        confidence=0.6,      # Slightly more sensitive to speech
+                        start_secs=0.3,      # Wait a bit longer before starting to listen
+                        stop_secs=1.2,       # Wait longer before assuming user finished (was 0.8)
+                        min_volume=0.5,      # More sensitive to quieter speech
                     )
                 ),
                 serializer=serializer,
