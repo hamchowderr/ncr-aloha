@@ -1,6 +1,6 @@
 # Core Pipecat with service integrations
 # Note: Daily transport requires Linux/macOS - no Windows wheels
-pipecat-ai[openai,deepgram,elevenlabs,silero,websocket]
+pipecat-ai[openai,deepgram,elevenlabs,silero,websocket,cartesia]
 
 # HTTP client for order API
 httpx
@@ -10,3 +10,7 @@ python-dotenv
 
 # Type hints and data validation
 pydantic
+
+# FastAPI server for Telnyx
+fastapi
+uvicorn
