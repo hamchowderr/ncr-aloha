@@ -771,10 +771,69 @@ async def websocket_handler(websocket: WebSocket):
             model="gpt-4o-mini",
         )
 
-        # Create FlowManager
+        # Create serializer
+        serializer = TelnyxFrameSerializer(
+            stream_id=stream_sid,
+            outbound_encoding="PCMU",
+            inbound_encoding="PCMU",
+            call_control_id=call_sid,
+            api_key=os.getenv("TELNYX_API_KEY"),
+        )
+
+        # Create transport
+        transport = FastAPIWebsocketTransport(
+            websocket=websocket,
+            params=FastAPIWebsocketParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                add_wav_header=False,
+                vad_analyzer=SileroVADAnalyzer(
+                    params=VADParams(
+                        confidence=0.7,
+                        start_secs=0.2,
+                        stop_secs=0.8,
+                        min_volume=0.6,
+                    )
+                ),
+                serializer=serializer,
+            ),
+        )
+
+        # Create transcript processor
+        transcript_processor = TranscriptProcessor(metrics)
+
+        # Create context aggregator for FlowManager (new API)
+        from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+        context = OpenAILLMContext()
+        context_aggregator = llm.create_context_aggregator(context)
+
+        # Build pipeline first (needed for FlowManager)
+        pipeline = Pipeline([
+            transport.input(),
+            stt,
+            transcript_processor,
+            context_aggregator.user(),
+            llm,
+            tts,
+            transport.output(),
+            context_aggregator.assistant(),
+        ])
+
+        task = PipelineTask(
+            pipeline,
+            params=PipelineParams(
+                audio_in_sample_rate=8000,
+                audio_out_sample_rate=8000,
+                allow_interruptions=True,
+                enable_metrics=True,
+            ),
+        )
+
+        # Create FlowManager with new API (requires task and context_aggregator)
         flow_manager = FlowManager(
+            task=task,
             llm=llm,
-            tts=tts,
+            context_aggregator=context_aggregator,
         )
 
         # Register function handlers
@@ -809,59 +868,6 @@ async def websocket_handler(websocket: WebSocket):
         @flow_manager.function_handler("end_call")
         async def handle_end_call(args: FlowArgs):
             return await order_manager.handle_end_call(args)
-
-        # Create serializer
-        serializer = TelnyxFrameSerializer(
-            stream_id=stream_sid,
-            outbound_encoding="PCMU",
-            inbound_encoding="PCMU",
-            call_control_id=call_sid,
-            api_key=os.getenv("TELNYX_API_KEY"),
-        )
-
-        # Create transport
-        transport = FastAPIWebsocketTransport(
-            websocket=websocket,
-            params=FastAPIWebsocketParams(
-                audio_in_enabled=True,
-                audio_out_enabled=True,
-                add_wav_header=False,
-                vad_analyzer=SileroVADAnalyzer(
-                    params=VADParams(
-                        confidence=0.7,
-                        start_secs=0.2,
-                        stop_secs=0.8,
-                        min_volume=0.6,
-                    )
-                ),
-                serializer=serializer,
-            ),
-        )
-
-        # Create transcript processor
-        transcript_processor = TranscriptProcessor(metrics)
-
-        # Build pipeline with FlowManager
-        pipeline = Pipeline([
-            transport.input(),
-            stt,
-            transcript_processor,
-            flow_manager.create_context_aggregator().user(),
-            llm,
-            tts,
-            transport.output(),
-            flow_manager.create_context_aggregator().assistant(),
-        ])
-
-        task = PipelineTask(
-            pipeline,
-            params=PipelineParams(
-                audio_in_sample_rate=8000,
-                audio_out_sample_rate=8000,
-                allow_interruptions=True,
-                enable_metrics=True,
-            ),
-        )
 
         # Give order manager reference to task for ending calls
         order_manager.set_task(task, llm)
