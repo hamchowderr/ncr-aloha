@@ -10,19 +10,13 @@ import {
 
 type CallState = "idle" | "connecting" | "connected" | "error";
 
-interface VoiceChatProps {
-  apiUrl?: string;
-}
-
-export function VoiceChat({ apiUrl = "" }: VoiceChatProps) {
+export function VoiceChat() {
   const [callState, setCallState] = useState<CallState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [roomUrl, setRoomUrl] = useState<string | null>(null);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [duration, setDuration] = useState(0);
-  const callFrameRef = useRef<any>(null);
-  const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const callFrameRef = useRef<unknown>(null);
+  const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Get the pipecat API URL for voice sessions
   const pipecatUrl = import.meta.env.DEV
@@ -37,8 +31,9 @@ export function VoiceChat({ apiUrl = "" }: VoiceChatProps) {
     }
     if (callFrameRef.current) {
       try {
-        callFrameRef.current.leave();
-        callFrameRef.current.destroy();
+        const frame = callFrameRef.current as { leave: () => void; destroy: () => void };
+        frame.leave();
+        frame.destroy();
       } catch (e) {
         console.error("Error cleaning up call frame:", e);
       }
