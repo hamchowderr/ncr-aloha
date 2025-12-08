@@ -51,7 +51,7 @@ from pipecat.transports.websocket.fastapi import (
 
 # Try to import Pipecat Flows
 try:
-    from pipecat_flows import FlowManager, FlowArgs, NodeConfig
+    from pipecat_flows import FlowManager, FlowArgs, FlowResult, FlowsFunctionSchema, NodeConfig
     FLOWS_AVAILABLE = True
 except ImportError:
     FLOWS_AVAILABLE = False
@@ -79,7 +79,7 @@ bot_processes = {}
 
 
 # ============================================================================
-# CONVERSATION FLOW NODES
+# CONVERSATION FLOW NODES - Using new pipecat-flows API with FlowsFunctionSchema
 # ============================================================================
 
 ROLE_MESSAGE = {
@@ -93,40 +93,125 @@ NEVER mention other restaurants. You are Allstar Wings & Ribs."""
 }
 
 
-def create_greeting_node() -> NodeConfig:
-    """Initial greeting and order type collection."""
-    return {
-        "name": "greeting",
-        "role_messages": [ROLE_MESSAGE],
-        "task_messages": [
-            {
+# ============================================================================
+# NODE FACTORY CLASS - Creates nodes with embedded handlers
+# ============================================================================
+
+class FlowNodeFactory:
+    """Creates flow nodes with proper handlers for the new pipecat-flows API."""
+
+    def __init__(self, order_client: OrderClient, metrics: "CallMetrics"):
+        self.order_client = order_client
+        self.metrics = metrics
+        self.items = []
+        self.customer_name = ""
+        self.customer_phone = ""
+        self.order_result = None
+        self.flow_manager = None
+        self.task = None
+        self.llm = None
+
+    def set_refs(self, flow_manager, task, llm):
+        """Set references needed for ending calls."""
+        self.flow_manager = flow_manager
+        self.task = task
+        self.llm = llm
+
+    def create_greeting_node(self) -> NodeConfig:
+        """Initial greeting node."""
+
+        async def handle_ready_to_order(args: FlowArgs) -> FlowResult:
+            logger.info("Customer ready to order")
+            return FlowResult(
+                result="Great! What would you like to order?",
+                node=self.create_order_collection_node()
+            )
+
+        return NodeConfig(
+            name="greeting",
+            role_messages=[ROLE_MESSAGE],
+            task_messages=[{
                 "role": "system",
                 "content": """Greet the customer warmly. This is a pickup order.
 
 Say: "Hi! Thanks for calling Allstar Wings and Ribs! What can I get for you today?"
 
 Listen to what they want to order and use set_ready_to_order to proceed."""
-            }
-        ],
-        "functions": [
-            {
-                "name": "set_ready_to_order",
-                "description": "Customer is ready to order - proceed to take their order",
-                "parameters": {
-                    "type": "object",
-                    "properties": {}
-                }
-            }
-        ]
-    }
+            }],
+            functions=[
+                FlowsFunctionSchema(
+                    name="set_ready_to_order",
+                    description="Customer is ready to order - proceed to take their order",
+                    handler=handle_ready_to_order,
+                    properties={},
+                    required=[]
+                )
+            ]
+        )
 
+    def create_order_collection_node(self) -> NodeConfig:
+        """Order collection node."""
 
-def create_order_collection_node() -> NodeConfig:
-    """Collect menu items from customer."""
-    return {
-        "name": "order_collection",
-        "task_messages": [
-            {
+        async def handle_add_item(args: FlowArgs) -> FlowResult:
+            item = {
+                "item_name": args.get("item_name", ""),
+                "quantity": args.get("quantity", 1),
+                "size": args.get("size"),
+                "modifiers": args.get("modifiers", [])
+            }
+            self.items.append(item)
+
+            item_desc = f"{item['quantity']}x {item['item_name']}"
+            if item['size']:
+                item_desc += f" ({item['size']})"
+            if item['modifiers']:
+                item_desc += f" with {', '.join(item['modifiers'])}"
+
+            logger.info(f"Added item: {item_desc}")
+            return FlowResult(
+                result=f"Got it, {item_desc}. Anything else?",
+                node=None  # Stay in same node
+            )
+
+        async def handle_get_menu(args: FlowArgs) -> FlowResult:
+            try:
+                menu = await self.order_client.get_menu()
+                items_by_category = {}
+                for item in menu.get("items", []):
+                    cat = item.get("category", "Other")
+                    if cat not in items_by_category:
+                        items_by_category[cat] = []
+                    items_by_category[cat].append(item)
+
+                result = ["Here's our menu:"]
+                for category, items in items_by_category.items():
+                    result.append(f"\n{category}:")
+                    for item in items[:5]:
+                        price = item.get("basePrice", 0)
+                        result.append(f"  {item['name']}: ${price:.2f}")
+
+                return FlowResult(result="\n".join(result), node=None)
+            except Exception as e:
+                logger.error(f"Failed to fetch menu: {e}")
+                return FlowResult(
+                    result="Sorry, I couldn't get the menu. What would you like to order?",
+                    node=None
+                )
+
+        async def handle_complete_order(args: FlowArgs) -> FlowResult:
+            if not self.items:
+                return FlowResult(
+                    result="You haven't ordered anything yet. What would you like?",
+                    node=None
+                )
+            return FlowResult(
+                result="Let me confirm your order.",
+                node=self.create_order_confirmation_node()
+            )
+
+        return NodeConfig(
+            name="order_collection",
+            task_messages=[{
                 "role": "system",
                 "content": """Help the customer build their order.
 
@@ -150,23 +235,20 @@ GUIDELINES:
 - When they say "that's it" or similar, use complete_order to move on
 
 Use add_item for each item. Use get_menu if they ask about prices."""
-            }
-        ],
-        "functions": [
-            {
-                "name": "add_item",
-                "description": "Add an item to the order",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
+            }],
+            functions=[
+                FlowsFunctionSchema(
+                    name="add_item",
+                    description="Add an item to the order",
+                    handler=handle_add_item,
+                    properties={
                         "item_name": {
                             "type": "string",
-                            "description": "Menu item name (e.g., 'Original Wings', 'Lord of the Wing', 'Boneless Bites', 'Full Rack Ribs')"
+                            "description": "Menu item name"
                         },
                         "quantity": {
                             "type": "integer",
-                            "description": "Number of this item",
-                            "default": 1
+                            "description": "Number of this item"
                         },
                         "size": {
                             "type": "string",
@@ -175,39 +257,52 @@ Use add_item for each item. Use get_menu if they ask about prices."""
                         "modifiers": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "description": "Flavors, sauces, or modifications"
+                            "description": "Flavors or modifications"
                         }
                     },
-                    "required": ["item_name"]
-                }
-            },
-            {
-                "name": "get_menu",
-                "description": "Get full menu with prices if customer asks",
-                "parameters": {"type": "object", "properties": {}}
-            },
-            {
-                "name": "complete_order",
-                "description": "Customer is done adding items - move to confirmation",
-                "parameters": {"type": "object", "properties": {}}
-            }
-        ]
-    }
+                    required=["item_name"]
+                ),
+                FlowsFunctionSchema(
+                    name="get_menu",
+                    description="Get full menu with prices",
+                    handler=handle_get_menu,
+                    properties={},
+                    required=[]
+                ),
+                FlowsFunctionSchema(
+                    name="complete_order",
+                    description="Customer is done adding items",
+                    handler=handle_complete_order,
+                    properties={},
+                    required=[]
+                )
+            ]
+        )
 
+    def create_order_confirmation_node(self) -> NodeConfig:
+        """Order confirmation node."""
+        items_text = "\n".join([
+            f"- {item.get('quantity', 1)}x {item.get('item_name')}" +
+            (f" ({item.get('size')})" if item.get('size') else "") +
+            (f" - {', '.join(item.get('modifiers', []))}" if item.get('modifiers') else "")
+            for item in self.items
+        ])
 
-def create_order_confirmation_node(items: list) -> NodeConfig:
-    """Confirm the complete order with customer."""
-    items_text = "\n".join([
-        f"- {item.get('quantity', 1)}x {item.get('item_name')}" +
-        (f" ({item.get('size')})" if item.get('size') else "") +
-        (f" - {', '.join(item.get('modifiers', []))}" if item.get('modifiers') else "")
-        for item in items
-    ])
+        async def handle_modify_order(args: FlowArgs) -> FlowResult:
+            return FlowResult(
+                result="No problem, what would you like to change?",
+                node=self.create_order_collection_node()
+            )
 
-    return {
-        "name": "order_confirmation",
-        "task_messages": [
-            {
+        async def handle_confirm_order(args: FlowArgs) -> FlowResult:
+            return FlowResult(
+                result="Perfect! Now I just need your name and phone number.",
+                node=self.create_customer_info_node()
+            )
+
+        return NodeConfig(
+            name="order_confirmation",
+            task_messages=[{
                 "role": "system",
                 "content": f"""Read back the order and ask customer to confirm:
 
@@ -218,29 +313,82 @@ Say something like: "Let me read that back: [items]. Does that sound right?"
 
 If they want to change something, use modify_order.
 If they confirm, use confirm_order."""
-            }
-        ],
-        "functions": [
-            {
-                "name": "modify_order",
-                "description": "Go back to modify the order",
-                "parameters": {"type": "object", "properties": {}}
-            },
-            {
-                "name": "confirm_order",
-                "description": "Customer confirmed - proceed to collect their info",
-                "parameters": {"type": "object", "properties": {}}
-            }
-        ]
-    }
+            }],
+            functions=[
+                FlowsFunctionSchema(
+                    name="modify_order",
+                    description="Go back to modify the order",
+                    handler=handle_modify_order,
+                    properties={},
+                    required=[]
+                ),
+                FlowsFunctionSchema(
+                    name="confirm_order",
+                    description="Customer confirmed order",
+                    handler=handle_confirm_order,
+                    properties={},
+                    required=[]
+                )
+            ]
+        )
 
+    def create_customer_info_node(self) -> NodeConfig:
+        """Customer info collection node."""
 
-def create_customer_info_node() -> NodeConfig:
-    """Collect customer name and phone number."""
-    return {
-        "name": "customer_info",
-        "task_messages": [
-            {
+        async def handle_set_customer_info(args: FlowArgs) -> FlowResult:
+            self.customer_name = args.get("name", "")
+            self.customer_phone = args.get("phone", "")
+
+            # Update metrics
+            self.metrics.customer_name = self.customer_name
+            self.metrics.customer_phone = self.customer_phone
+
+            logger.info(f"Customer: {self.customer_name}, Phone: {self.customer_phone}")
+
+            # Submit order
+            try:
+                order = VoiceOrder(
+                    orderType="pickup",
+                    items=[
+                        OrderItem(
+                            itemName=item["item_name"],
+                            quantity=item.get("quantity", 1),
+                            size=item.get("size"),
+                            modifiers=item.get("modifiers", [])
+                        )
+                        for item in self.items
+                    ],
+                    customer=Customer(
+                        name=self.customer_name,
+                        phone=self.customer_phone
+                    )
+                )
+
+                result = await self.order_client.submit_order(order)
+                self.order_result = {
+                    "success": result.success,
+                    "orderId": result.orderId,
+                    "errors": result.errors
+                }
+
+                if result.success:
+                    self.metrics.order_submitted = True
+                    self.metrics.order_id = result.orderId
+
+                logger.info(f"Order submitted: {self.order_result}")
+
+            except Exception as e:
+                logger.error(f"Order submission failed: {e}")
+                self.order_result = {"success": False, "errors": [str(e)]}
+
+            return FlowResult(
+                result="Submitting your order now...",
+                node=self.create_completion_node()
+            )
+
+        return NodeConfig(
+            name="customer_info",
+            task_messages=[{
                 "role": "system",
                 "content": """Collect the customer's name and phone number for the order.
 
@@ -250,65 +398,87 @@ Then: "And your phone number?"
 Read back the phone number to confirm it's correct.
 
 When you have both name and phone, use set_customer_info to submit."""
-            }
-        ],
-        "functions": [
-            {
-                "name": "set_customer_info",
-                "description": "Record customer name and phone, then submit order",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "Customer's name"
-                        },
-                        "phone": {
-                            "type": "string",
-                            "description": "Customer's phone number"
-                        }
+            }],
+            functions=[
+                FlowsFunctionSchema(
+                    name="set_customer_info",
+                    description="Record customer name and phone, submit order",
+                    handler=handle_set_customer_info,
+                    properties={
+                        "name": {"type": "string", "description": "Customer's name"},
+                        "phone": {"type": "string", "description": "Customer's phone number"}
                     },
-                    "required": ["name", "phone"]
-                }
-            }
-        ]
-    }
+                    required=["name", "phone"]
+                )
+            ]
+        )
 
+    def create_completion_node(self) -> NodeConfig:
+        """Completion node."""
+        success = self.order_result.get("success", False) if self.order_result else False
+        order_id = self.order_result.get("orderId", "")[:8] if self.order_result and self.order_result.get("orderId") else ""
 
-def create_completion_node(order_result: dict) -> NodeConfig:
-    """Final confirmation and goodbye."""
-    success = order_result.get("success", False)
-    order_id = order_result.get("orderId", "")[:8] if order_result.get("orderId") else ""
-
-    if success:
-        message = f"""Order placed successfully! Order number: {order_id}
+        if success:
+            message = f"""Order placed successfully! Order number: {order_id}
 
 Thank the customer and tell them:
 "Your order will be ready in about 15-20 minutes for pickup. Thanks for calling Allstar Wings!"
 
 Then use end_call to finish."""
-    else:
-        errors = ", ".join(order_result.get("errors", ["Unknown error"]))
-        message = f"""There was a problem with the order: {errors}
+        else:
+            errors = ", ".join(self.order_result.get("errors", ["Unknown error"])) if self.order_result else "Unknown error"
+            message = f"""There was a problem with the order: {errors}
 
 Apologize and offer to try again. If they want to cancel, use end_call."""
 
-    return {
-        "name": "completion",
-        "task_messages": [
-            {
-                "role": "system",
-                "content": message
-            }
-        ],
-        "functions": [
-            {
-                "name": "end_call",
-                "description": "End the call after saying goodbye",
-                "parameters": {"type": "object", "properties": {}}
-            }
-        ]
-    }
+        async def handle_end_call(args: FlowArgs) -> FlowResult:
+            logger.info("End call requested")
+            self.metrics.end_time = datetime.now()
+            self.metrics.log_summary()
+
+            # Schedule task end after goodbye
+            if self.task and self.llm:
+                async def end_after_delay():
+                    await asyncio.sleep(3.0)
+                    await self.llm.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+                asyncio.create_task(end_after_delay())
+
+            return FlowResult(result="Goodbye!", node=None)
+
+        return NodeConfig(
+            name="completion",
+            task_messages=[{"role": "system", "content": message}],
+            functions=[
+                FlowsFunctionSchema(
+                    name="end_call",
+                    description="End the call after saying goodbye",
+                    handler=handle_end_call,
+                    properties={},
+                    required=[]
+                )
+            ]
+        )
+
+
+# Keep old functions for backward compatibility but they won't be used
+def create_greeting_node() -> NodeConfig:
+    """Deprecated - use FlowNodeFactory instead."""
+    pass
+
+
+def create_order_collection_node() -> NodeConfig:
+    """Deprecated - use FlowNodeFactory instead."""
+    pass
+
+
+def create_order_confirmation_node(items: list) -> NodeConfig:
+    """Deprecated - use FlowNodeFactory instead."""
+    pass
+
+
+def create_customer_info_node() -> NodeConfig:
+    """Deprecated - use FlowNodeFactory instead."""
+    pass
 
 
 # ============================================================================
@@ -395,169 +565,6 @@ class TranscriptProcessor(FrameProcessor):
                 logger.debug(f"Transcript [assistant]: {frame.text}")
 
         await self.push_frame(frame, direction)
-
-
-# ============================================================================
-# FLOW MANAGER WITH ORDER STATE
-# ============================================================================
-
-class TelnyxOrderFlowManager:
-    """Manages conversation flow and order state for Telnyx calls."""
-
-    def __init__(self, order_client: OrderClient, metrics: CallMetrics):
-        self.order_client = order_client
-        self.metrics = metrics
-        self.flow_manager: Optional[FlowManager] = None
-        self.task: Optional[PipelineTask] = None
-        self.llm = None
-
-        # Order state
-        self.order_type = "pickup"
-        self.items = []
-        self.customer_name = ""
-        self.customer_phone = ""
-        self.order_result = None
-
-    def set_task(self, task: PipelineTask, llm):
-        """Set the pipeline task and LLM for ending calls."""
-        self.task = task
-        self.llm = llm
-
-    async def initialize(self, flow_manager: FlowManager):
-        """Initialize with FlowManager."""
-        self.flow_manager = flow_manager
-        flow_manager.state["order_manager"] = self
-
-    async def handle_set_ready_to_order(self, args: FlowArgs) -> tuple:
-        """Customer is ready to order."""
-        logger.info("Customer ready to order")
-        return "Great! What would you like?", create_order_collection_node()
-
-    async def handle_add_item(self, args: FlowArgs) -> tuple:
-        """Add item to order."""
-        item = {
-            "item_name": args.get("item_name", ""),
-            "quantity": args.get("quantity", 1),
-            "size": args.get("size"),
-            "modifiers": args.get("modifiers", [])
-        }
-        self.items.append(item)
-
-        item_desc = f"{item['quantity']}x {item['item_name']}"
-        if item['size']:
-            item_desc += f" ({item['size']})"
-        if item['modifiers']:
-            item_desc += f" with {', '.join(item['modifiers'])}"
-
-        logger.info(f"Added item: {item_desc}")
-        return f"Got it, {item_desc}. Anything else?", None  # Stay in same node
-
-    async def handle_get_menu(self, args: FlowArgs) -> tuple:
-        """Fetch and return menu."""
-        try:
-            menu = await self.order_client.get_menu()
-            items_by_category = {}
-            for item in menu.get("items", []):
-                cat = item.get("category", "Other")
-                if cat not in items_by_category:
-                    items_by_category[cat] = []
-                items_by_category[cat].append(item)
-
-            result = ["Here's our menu:"]
-            for category, items in items_by_category.items():
-                result.append(f"\n{category}:")
-                for item in items[:5]:
-                    price = item.get("basePrice", 0)
-                    result.append(f"  {item['name']}: ${price:.2f}")
-
-            return "\n".join(result), None
-        except Exception as e:
-            logger.error(f"Failed to fetch menu: {e}")
-            return "Sorry, I couldn't get the menu. What would you like to order?", None
-
-    async def handle_complete_order(self, args: FlowArgs) -> tuple:
-        """Move to order confirmation."""
-        if not self.items:
-            return "You haven't ordered anything yet. What would you like?", None
-
-        return "Let me confirm your order.", create_order_confirmation_node(self.items)
-
-    async def handle_modify_order(self, args: FlowArgs) -> tuple:
-        """Go back to order collection."""
-        return "No problem, what would you like to change?", create_order_collection_node()
-
-    async def handle_confirm_order(self, args: FlowArgs) -> tuple:
-        """Order confirmed, get customer info."""
-        return "Perfect! Now I just need your name and phone number.", create_customer_info_node()
-
-    async def handle_set_customer_info(self, args: FlowArgs) -> tuple:
-        """Set customer info and submit order."""
-        self.customer_name = args.get("name", "")
-        self.customer_phone = args.get("phone", "")
-
-        # Update metrics
-        self.metrics.customer_name = self.customer_name
-        self.metrics.customer_phone = self.customer_phone
-
-        logger.info(f"Customer: {self.customer_name}, Phone: {self.customer_phone}")
-
-        # Submit order
-        try:
-            order = VoiceOrder(
-                orderType=self.order_type,
-                items=[
-                    OrderItem(
-                        itemName=item["item_name"],
-                        quantity=item.get("quantity", 1),
-                        size=item.get("size"),
-                        modifiers=item.get("modifiers", [])
-                    )
-                    for item in self.items
-                ],
-                customer=Customer(
-                    name=self.customer_name,
-                    phone=self.customer_phone
-                )
-            )
-
-            result = await self.order_client.submit_order(order)
-            self.order_result = {
-                "success": result.success,
-                "orderId": result.orderId,
-                "errors": result.errors,
-                "warnings": result.warnings
-            }
-
-            # Update metrics
-            if result.success:
-                self.metrics.order_submitted = True
-                self.metrics.order_id = result.orderId
-
-            logger.info(f"Order submitted: {self.order_result}")
-
-        except Exception as e:
-            logger.error(f"Order submission failed: {e}")
-            self.order_result = {
-                "success": False,
-                "errors": [str(e)]
-            }
-
-        return "Submitting your order now...", create_completion_node(self.order_result)
-
-    async def handle_end_call(self, args: FlowArgs) -> tuple:
-        """Signal end of call."""
-        logger.info("End call requested")
-        self.metrics.end_time = datetime.now()
-        self.metrics.log_summary()
-
-        # Schedule task cancellation after a short delay for goodbye
-        if self.task and self.llm:
-            async def end_after_delay():
-                await asyncio.sleep(3.0)
-                await self.llm.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
-            asyncio.create_task(end_after_delay())
-
-        return "Goodbye!", None
 
 
 # ============================================================================
@@ -748,8 +755,8 @@ async def websocket_handler(websocket: WebSocket):
     order_api_url = os.getenv("ORDER_API_URL", "http://host.docker.internal:3000")
     order_client = OrderClient(order_api_url)
 
-    # Create flow manager
-    order_manager = TelnyxOrderFlowManager(order_client, metrics)
+    # Create node factory (new API with FlowsFunctionSchema)
+    node_factory = FlowNodeFactory(order_client, metrics)
 
     try:
         # Initialize services
@@ -830,54 +837,21 @@ async def websocket_handler(websocket: WebSocket):
         )
 
         # Create FlowManager with new API (requires task and context_aggregator)
+        # Handlers are embedded in nodes via FlowsFunctionSchema
         flow_manager = FlowManager(
             task=task,
             llm=llm,
             context_aggregator=context_aggregator,
         )
 
-        # Register function handlers
-        @flow_manager.function_handler("set_ready_to_order")
-        async def handle_set_ready_to_order(args: FlowArgs):
-            return await order_manager.handle_set_ready_to_order(args)
-
-        @flow_manager.function_handler("add_item")
-        async def handle_add_item(args: FlowArgs):
-            return await order_manager.handle_add_item(args)
-
-        @flow_manager.function_handler("get_menu")
-        async def handle_get_menu(args: FlowArgs):
-            return await order_manager.handle_get_menu(args)
-
-        @flow_manager.function_handler("complete_order")
-        async def handle_complete_order(args: FlowArgs):
-            return await order_manager.handle_complete_order(args)
-
-        @flow_manager.function_handler("modify_order")
-        async def handle_modify_order(args: FlowArgs):
-            return await order_manager.handle_modify_order(args)
-
-        @flow_manager.function_handler("confirm_order")
-        async def handle_confirm_order(args: FlowArgs):
-            return await order_manager.handle_confirm_order(args)
-
-        @flow_manager.function_handler("set_customer_info")
-        async def handle_set_customer_info(args: FlowArgs):
-            return await order_manager.handle_set_customer_info(args)
-
-        @flow_manager.function_handler("end_call")
-        async def handle_end_call(args: FlowArgs):
-            return await order_manager.handle_end_call(args)
-
-        # Give order manager reference to task for ending calls
-        order_manager.set_task(task, llm)
+        # Give node factory references for ending calls
+        node_factory.set_refs(flow_manager, task, llm)
 
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, client):
             logger.info("Client connected to Flows pipeline")
-            # Initialize flow manager and start greeting
-            await order_manager.initialize(flow_manager)
-            await flow_manager.initialize(create_greeting_node())
+            # Initialize flow manager with greeting node (handlers embedded in node)
+            await flow_manager.initialize(node_factory.create_greeting_node())
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(transport, client):
