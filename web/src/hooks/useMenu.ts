@@ -9,8 +9,8 @@ export function useMenu() {
   useEffect(() => {
     async function fetchMenu() {
       try {
-        // In production, call the VPS directly. In dev, use proxy.
-        const apiUrl = import.meta.env.DEV ? "/api" : "https://ncr-aloha.tylanmiller.tech";
+        // In production, call the API directly. In dev, use local proxy.
+        const apiUrl = import.meta.env.DEV ? "" : "https://ncr-aloha.tylanmiller.tech";
         const res = await fetch(`${apiUrl}/menu`);
         if (!res.ok) throw new Error("Failed to fetch menu");
         const data = await res.json();

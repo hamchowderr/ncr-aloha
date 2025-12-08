@@ -52,7 +52,8 @@ export function CallsPage() {
   const fetchCalls = async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/calls?limit=50");
+      const apiUrl = import.meta.env.DEV ? "" : "https://ncr-aloha.tylanmiller.tech";
+      const response = await fetch(`${apiUrl}/calls?limit=50`);
       if (!response.ok) throw new Error("Failed to fetch calls");
       const result = await response.json();
       setData(result);
