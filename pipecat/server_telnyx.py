@@ -353,7 +353,10 @@ async def websocket_handler(websocket: WebSocket):
             logger.info("End call requested")
             metrics.end_time = datetime.now()
             metrics.log_summary()
-            await params.result_callback("Ending call now.")
+            # Return result and wait for TTS to finish speaking goodbye before ending
+            await params.result_callback("Call ending. Say a brief goodbye to the customer.")
+            # Give TTS time to speak the goodbye message before ending the pipeline
+            await asyncio.sleep(3.0)
             await llm.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
         # Register all functions with the LLM
