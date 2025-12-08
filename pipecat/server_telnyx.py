@@ -5,6 +5,7 @@ This server:
 1. Serves TeXML to Telnyx when a call comes in
 2. Accepts WebSocket connections for real-time audio streaming
 3. Runs the Pipecat bot for each call
+4. Creates Daily.co rooms for browser-based voice chat
 
 Usage:
   1. Start ngrok: ngrok http 8765
@@ -18,6 +19,8 @@ Usage:
 import os
 import sys
 import asyncio
+import uuid
+import subprocess
 from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -26,6 +29,7 @@ from dotenv import load_dotenv
 from loguru import logger
 from fastapi import FastAPI, WebSocket, Request, Response
 from fastapi.responses import PlainTextResponse
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import httpx
 
@@ -61,6 +65,59 @@ PUBLIC_URL = os.getenv("PUBLIC_URL", "")
 
 # Store active calls
 active_calls = {}
+
+# Store Daily.co sessions
+daily_sessions = {}
+
+# Bot process references
+bot_processes = {}
+
+
+async def create_daily_room() -> dict:
+    """Create a Daily.co room for browser voice chat."""
+    api_key = os.getenv("DAILY_API_KEY")
+
+    if not api_key:
+        raise ValueError("DAILY_API_KEY not set in environment")
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://api.daily.co/v1/rooms",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "properties": {
+                    "exp": 3600,  # 1 hour expiry
+                    "enable_chat": False,
+                    "start_video_off": True,
+                    "enable_recording": os.getenv("ENABLE_RECORDING", "false").lower() == "true",
+                }
+            },
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+async def spawn_daily_bot(room_url: str, session_id: str):
+    """Spawn a Daily.co bot process for the given room."""
+    bot_script = "bot.py"
+    script_path = os.path.join(os.path.dirname(__file__), bot_script)
+
+    try:
+        # Spawn bot as subprocess
+        process = subprocess.Popen(
+            [sys.executable, script_path, room_url, "", session_id],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        bot_processes[session_id] = process
+        logger.info(f"Spawned Daily bot for session {session_id} (PID: {process.pid})")
+        return process.pid
+    except Exception as e:
+        logger.error(f"Failed to spawn Daily bot: {e}")
+        return None
 
 
 class CallMetrics:
@@ -103,6 +160,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for voice chat
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
@@ -376,6 +442,104 @@ async def list_calls():
             for sid, m in active_calls.items()
         ]
     }
+
+
+# ==========================================
+# Daily.co Browser Voice Chat Endpoints
+# ==========================================
+
+@app.post("/sessions")
+async def create_session(request: Request):
+    """
+    Create a new Daily.co voice session for browser chat.
+
+    Returns room URL that the client can use to join the voice call.
+    """
+    try:
+        # Create Daily.co room
+        room = await create_daily_room()
+        room_url = room.get("url")
+        room_name = room.get("name")
+
+        if not room_url:
+            return {"error": "Failed to create room", "details": room}
+
+        session_id = str(uuid.uuid4())
+
+        # Spawn bot for this room
+        bot_pid = await spawn_daily_bot(room_url, session_id)
+
+        # Track session
+        daily_sessions[session_id] = {
+            "session_id": session_id,
+            "room_url": room_url,
+            "room_name": room_name,
+            "status": "bot_running" if bot_pid else "waiting_for_bot",
+            "bot_pid": bot_pid,
+            "created_at": datetime.now().isoformat(),
+        }
+
+        logger.info(f"Daily session created: {session_id} (room: {room_name})")
+
+        return {
+            "session_id": session_id,
+            "room_url": room_url,
+            "room_name": room_name,
+            "status": daily_sessions[session_id]["status"],
+        }
+
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Daily API error: {e}")
+        return {"error": "Failed to create Daily.co room", "details": str(e)}
+    except Exception as e:
+        logger.error(f"Session creation error: {e}")
+        return {"error": str(e)}
+
+
+@app.get("/sessions/{session_id}")
+async def get_session(session_id: str):
+    """Get the status of a Daily.co voice session."""
+    if session_id not in daily_sessions:
+        return {"error": "Session not found"}
+
+    session = daily_sessions[session_id]
+
+    # Check if bot process is still running
+    if session.get("bot_pid") and session_id in bot_processes:
+        process = bot_processes[session_id]
+        if process.poll() is not None:
+            # Process has exited
+            session["status"] = "completed"
+            session["exit_code"] = process.returncode
+
+    return session
+
+
+@app.delete("/sessions/{session_id}")
+async def end_session(session_id: str):
+    """End a Daily.co voice session and terminate the bot."""
+    if session_id not in daily_sessions:
+        return {"error": "Session not found"}
+
+    # Terminate bot process if running
+    if session_id in bot_processes:
+        process = bot_processes[session_id]
+        if process.poll() is None:
+            process.terminate()
+            logger.info(f"Terminated Daily bot for session {session_id}")
+
+    daily_sessions[session_id]["status"] = "ended"
+
+    return {
+        "session_id": session_id,
+        "status": "ended"
+    }
+
+
+@app.get("/sessions")
+async def list_sessions():
+    """List all Daily.co voice sessions."""
+    return {"sessions": list(daily_sessions.values())}
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ import { MenuItemCard } from "@/components/MenuItemCard";
 import { ItemConfigDialog } from "@/components/ItemConfigDialog";
 import { Cart } from "@/components/Cart";
 import { CallsPage } from "@/components/CallsPage";
+import { VoiceChat } from "@/components/VoiceChat";
 import { useMenu } from "@/hooks/useMenu";
 import { useCart } from "@/hooks/useCart";
 import type { MenuItem } from "@/types/menu";
@@ -136,6 +137,9 @@ function App() {
           cart.addItem(item, size, modifiers, quantity);
         }}
       />
+
+      {/* Voice Chat Button */}
+      <VoiceChat />
     </div>
   );
 }
