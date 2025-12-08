@@ -1,6 +1,6 @@
 # Core Pipecat with service integrations
 # Note: Daily transport requires Linux/macOS - no Windows wheels
-pipecat-ai[openai,deepgram,elevenlabs,silero,websocket,cartesia]
+pipecat-ai[openai,deepgram,elevenlabs,silero,websocket,cartesia,groq]
 
 # HTTP client for order API
 httpx
