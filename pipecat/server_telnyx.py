@@ -103,7 +103,7 @@ async def create_daily_room() -> dict:
 
 async def spawn_daily_bot(room_url: str, session_id: str):
     """Spawn a Daily.co bot process for the given room."""
-    bot_script = "bot.py"
+    bot_script = "bot_flows.py"  # Use Flows version for structured conversation
     script_path = os.path.join(os.path.dirname(__file__), bot_script)
 
     # Create environment for subprocess
@@ -120,7 +120,7 @@ async def spawn_daily_bot(room_url: str, session_id: str):
             env=bot_env,
         )
         bot_processes[session_id] = process
-        logger.info(f"Spawned Daily bot for session {session_id} (PID: {process.pid}) with ORDER_API_URL=http://backend:3000")
+        logger.info(f"Spawned Daily Flows bot for session {session_id} (PID: {process.pid}) with ORDER_API_URL=http://backend:3000")
         return process.pid
     except Exception as e:
         logger.error(f"Failed to spawn Daily bot: {e}")
