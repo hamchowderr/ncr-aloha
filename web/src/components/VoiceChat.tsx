@@ -46,7 +46,6 @@ export function VoiceChat() {
   const startCall = async () => {
     setCallState("connecting");
     setError(null);
-    setIsDialogOpen(true);
 
     try {
       // Create a Daily.co session via the pipecat server
@@ -66,7 +65,6 @@ export function VoiceChat() {
       }
 
       setSessionId(data.session_id);
-      setRoomUrl(data.room_url);
 
       // Load Daily.co SDK dynamically
       const DailyIframe = await import("@daily-co/daily-js").then(
@@ -102,10 +100,9 @@ export function VoiceChat() {
       callFrame.on("left-meeting", () => {
         setCallState("idle");
         cleanup();
-        setIsDialogOpen(false);
       });
 
-      callFrame.on("error", (e: any) => {
+      callFrame.on("error", (e: { errorMsg?: string }) => {
         console.error("Daily.co error:", e);
         setError(e.errorMsg || "Connection error");
         setCallState("error");
@@ -141,8 +138,6 @@ export function VoiceChat() {
 
     setCallState("idle");
     setSessionId(null);
-    setRoomUrl(null);
-    setIsDialogOpen(false);
   }, [sessionId, pipecatUrl, cleanup]);
 
   // Cleanup on unmount
