@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y \
 # Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir 'pipecat-ai[daily,openai,deepgram,cartesia,silero]' daily-python pipecat-flows
+RUN pip install --no-cache-dir 'pipecat-ai[daily,openai,deepgram,cartesia,silero]' daily-python pipecat-ai-flows
 
 # Copy application code
 COPY *.py ./

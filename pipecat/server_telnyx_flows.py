@@ -55,7 +55,7 @@ try:
     FLOWS_AVAILABLE = True
 except ImportError:
     FLOWS_AVAILABLE = False
-    logger.warning("pipecat-flows not available - install with: pip install pipecat-flows")
+    logger.warning("pipecat-ai-flows not available - install with: pip install pipecat-ai-flows")
 
 from order_client import OrderClient, VoiceOrder, OrderItem, Customer
 

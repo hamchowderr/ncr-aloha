@@ -37,7 +37,7 @@ try:
     FLOWS_AVAILABLE = True
 except ImportError:
     FLOWS_AVAILABLE = False
-    logging.warning("pipecat-flows not available - install with: pip install pipecat-flows")
+    logging.warning("pipecat-ai-flows not available - install with: pip install pipecat-ai-flows")
 
 # Try to import smart turn analyzer
 try:
