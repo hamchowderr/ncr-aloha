@@ -35,7 +35,7 @@ import httpx
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMMessagesUpdateFrame, EndTaskFrame
+from pipecat.frames.frames import LLMMessagesUpdateFrame, EndTaskFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -363,6 +363,24 @@ async def websocket_handler(websocket: WebSocket):
         llm.register_function("get_order_summary", handle_get_order_summary)
         llm.register_function("submit_order", handle_submit_order)
         llm.register_function("end_call", handle_end_call)
+
+        # Add filler phrases for slow LLM responses (Pipecat Eve pattern)
+        # This helps users know the bot is still processing during slow responses
+        @llm.event_handler("on_function_calls_started")
+        async def on_function_calls_started(llm_service, function_calls):
+            """Speak a filler phrase when function calls start to fill the silence."""
+            func_names = [f.function_name for f in function_calls]
+            logger.info(f"Function calls started: {func_names}")
+
+            # Say a thinking phrase while we process
+            if "get_menu" in func_names:
+                await task.queue_frame(TTSSpeakFrame("Let me check the menu for you."))
+            elif "submit_order" in func_names:
+                await task.queue_frame(TTSSpeakFrame("One moment while I place that order."))
+            elif "add_item" in func_names or "remove_item" in func_names:
+                await task.queue_frame(TTSSpeakFrame("Got it."))
+            else:
+                await task.queue_frame(TTSSpeakFrame("One moment."))
 
         # Create serializer - Telnyx uses PCMU (G.711 µ-law) encoding
         serializer = TelnyxFrameSerializer(
