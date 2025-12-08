@@ -105,15 +105,21 @@ async def spawn_daily_bot(room_url: str, session_id: str):
     bot_script = "bot.py"
     script_path = os.path.join(os.path.dirname(__file__), bot_script)
 
+    # Create environment for subprocess
+    # Use Docker service name since subprocess runs inside same container
+    bot_env = os.environ.copy()
+    bot_env["ORDER_API_URL"] = "http://backend:3000"
+
     try:
-        # Spawn bot as subprocess
+        # Spawn bot as subprocess with correct environment
         process = subprocess.Popen(
             [sys.executable, script_path, room_url, "", session_id],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=bot_env,
         )
         bot_processes[session_id] = process
-        logger.info(f"Spawned Daily bot for session {session_id} (PID: {process.pid})")
+        logger.info(f"Spawned Daily bot for session {session_id} (PID: {process.pid}) with ORDER_API_URL=http://backend:3000")
         return process.pid
     except Exception as e:
         logger.error(f"Failed to spawn Daily bot: {e}")
@@ -400,8 +406,8 @@ async def websocket_handler(websocket: WebSocket):
             logger.info("Client connected to pipeline")
             # Add greeting prompt and trigger LLM response
             greeting_message = {
-                "role": "system",
-                "content": "A customer just called. Greet them warmly and ask what they'd like to order."
+                "role": "user",
+                "content": "[Customer just answered the phone. Give a friendly, natural greeting.]"
             }
             await task.queue_frames([LLMMessagesUpdateFrame(messages=[greeting_message], run_llm=True)])
 
