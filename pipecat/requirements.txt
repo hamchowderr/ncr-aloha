@@ -14,3 +14,4 @@ pydantic
 # FastAPI server for Telnyx
 fastapi
 uvicorn
+python-multipart
