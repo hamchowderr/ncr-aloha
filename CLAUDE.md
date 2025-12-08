@@ -32,6 +32,26 @@ Terminal 2: `cd web && npm run dev` (frontend on :5173)
 
 The frontend proxies `/api/*` requests to `localhost:3000`.
 
+### Docker Deployment
+```bash
+# Standard deployment (free-form conversation)
+docker compose up -d --build
+
+# With Pipecat Flows (structured conversation)
+USE_FLOWS=true docker compose up -d --build
+
+# Rebuild single service
+docker compose up -d --build pipecat
+
+# View logs
+docker logs ncr-pipecat --tail 50 -f
+docker logs ncr-backend --tail 50 -f
+```
+
+Container architecture:
+- `ncr-backend` (port 3000): TypeScript Express API
+- `ncr-pipecat` (port 8765): Python voice bot server
+
 ## Architecture
 
 ### Backend (`src/`)
@@ -132,17 +152,18 @@ Python-based voice AI that connects to the TypeScript API.
 - Silero VAD for voice activity detection
 - Call metrics and observability
 
-**Telnyx VOIP Bot (`bot_telnyx.py`):**
+**Telnyx VOIP Bot (`server_telnyx.py`):**
 - Real phone calls via Telnyx SIP/VOIP
-- WebSocket media streaming (8kHz audio)
-- Same order logic as standard bot
+- FastAPI server with WebSocket media streaming (8kHz audio)
+- Uses OpenAI GPT-4o-mini with function calling
+- Cartesia TTS, Deepgram STT
 - Requires: Telnyx account + phone number
 
 **Flows Bot (`bot_flows.py`):**
 - Structured conversation with explicit state transitions
 - Node-based flow: greeting → order_collection → confirmation → customer_info → completion
 - More predictable ordering experience
-- Requires: `pip install pipecat-flows`
+- Requires: `pip install pipecat-ai-flows`
 
 **Telnyx Flows Bot (`server_telnyx_flows.py`):**
 - Combines Telnyx VOIP transport with Pipecat Flows
@@ -150,6 +171,38 @@ Python-based voice AI that connects to the TypeScript API.
 - Same flow: greeting → order_collection → order_confirmation → customer_info → completion
 - Includes transcript tracking and call metrics
 - Enable with `USE_FLOWS=true` in Docker
+
+### Pipecat Flows API (pipecat-ai-flows 0.0.22+)
+
+The Flows API uses `FlowsFunctionSchema` with embedded handlers:
+
+```python
+from pipecat_flows import FlowManager, FlowArgs, FlowResult, FlowsFunctionSchema, NodeConfig
+
+# Handlers return FlowResult with optional next node
+async def handle_add_item(args: FlowArgs) -> FlowResult:
+    item = args.get("item_name")
+    return FlowResult(result=f"Added {item}", node=None)  # None = stay in current node
+
+# Nodes embed handlers via FlowsFunctionSchema
+node = NodeConfig(
+    name="order_collection",
+    task_messages=[{"role": "system", "content": "..."}],
+    functions=[
+        FlowsFunctionSchema(
+            name="add_item",
+            handler=handle_add_item,
+            description="Add item to order",
+            properties={"item_name": {"type": "string"}},
+            required=["item_name"]
+        )
+    ]
+)
+
+# FlowManager requires task and context_aggregator
+flow_manager = FlowManager(task=task, llm=llm, context_aggregator=context_aggregator)
+await flow_manager.initialize(initial_node)
+```
 
 ### Setup
 
@@ -166,7 +219,7 @@ python test_order.py         # Text-based conversation test
 ```bash
 cd pipecat
 source venv-wsl/bin/activate  # In WSL
-pip install 'pipecat-ai[daily,openai,deepgram,elevenlabs,silero]' pipecat-flows httpx python-dotenv pydantic
+pip install 'pipecat-ai[daily,openai,deepgram,cartesia,silero]' pipecat-ai-flows httpx python-dotenv pydantic
 ```
 
 ### Running
@@ -212,9 +265,10 @@ curl http://localhost:8765/health
 `daily-python` has no Windows wheels. Use WSL Ubuntu with `venv-wsl` for voice features, or use `test_order.py` for text-based testing on Windows.
 
 ### Files
+- `server_telnyx.py` - Main Telnyx VOIP server (free-form conversation)
+- `server_telnyx_flows.py` - Telnyx server with Pipecat Flows (structured states)
 - `bot.py` - Daily.co WebRTC bot with GPT-4o and Cartesia TTS
-- `bot_telnyx.py` - Telnyx VOIP bot for real phone calls
-- `bot_flows.py` - Pipecat Flows version with structured conversation states
+- `bot_flows.py` - Daily.co Flows version with structured conversation states
 - `order_assistant.py` - Order extraction with function calling (voice-optimized prompt)
 - `order_client.py` - HTTP client for TypeScript API
 - `create_room.py` - Daily.co room creation helper
@@ -246,6 +300,9 @@ CARTESIA_VOICE_ID=      # Voice ID for TTS
 
 # Backend
 ORDER_API_URL=http://localhost:3000  # TypeScript backend (use host.docker.internal from WSL)
+
+# Production
+PUBLIC_URL=https://your-domain.com  # Required for Telnyx WebSocket URL in production
 ```
 
 ### Telnyx Setup
