@@ -44,7 +44,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.serializers.telnyx import TelnyxFrameSerializer
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.groq.llm import GroqLLMService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketParams,
@@ -297,9 +297,9 @@ async def websocket_handler(websocket: WebSocket):
             sample_rate=8000,
         )
 
-        llm = OpenAILLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o",  # Better instruction following than Groq Llama
+        llm = GroqLLMService(
+            api_key=os.getenv("GROQ_API_KEY"),
+            model="llama-3.3-70b-versatile",  # Fast, low-latency for phone calls
         )
 
         # Register function handlers using FunctionCallParams pattern
