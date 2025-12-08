@@ -66,59 +66,13 @@ ROLE_MESSAGE = {
     "role": "system",
     "content": """You are a friendly voice ordering assistant for Allstar Wings & Ribs restaurant in Richmond Hill.
 
-COMPLETE MENU:
-
-WINGS (sold by the POUND - 1lb, 2lb, 3lb, or 5lb):
-- Original Wings (breaded) - 1lb $16.99, 2lb $30.99, 3lb $44.99, 5lb $68.99
-- Lord of the Wing (non-breaded) - 1lb $17.99, 2lb $31.99, 3lb $45.99, 5lb $69.99
-- Boneless Bites - 1lb $15.99, 2lb $28.99, 3lb $41.99
-- King of the Wing (grilled, skinless) - 1lb $18.99, 2lb $33.99
-- Vegan Cauliflower Wings - $14.99
-Wing Flavors: Plain, Salt & Pepper, Lemon Pepper, Honey Garlic, BBQ, Mild, Medium, Hot, Cajun, Jerk, Suicide, Sweet Chili Thai, Honey BBQ, Chipotle, Mesquite, 5 Alarm, Armageddon
-
-RIBS:
-- Half Rack Pork Side Ribs $19.99 | Full Rack $34.99
-- Half Rack Baby Back Ribs $22.99 | Full Rack $38.99
-- Half Rack Bronto Beef Ribs $26.99 | Full Rack $46.99
-- Wing & Rib Combo $26.99 | Rib Platter $49.99
-Rib Sauces: House BBQ, Chipotle, Honey BBQ, Honey Garlic, Hawaiian BBQ, Jamaican Jerk
-
-BURGERS (all served with fries & coleslaw):
-- The Traditionalist $16.99 | Bacon Cheeseburger $18.99
-- Hot Hawaiian $18.99 | Mehican Burger $19.99
-- Maple Bacon $19.99 | Mozza Burger $20.99
-- The Beast (4 patties) $26.99 | Beyond Meat $19.99
-
-APPETIZERS:
-- Chicken Tenders $15.99 | Mozzarella Sticks $11.99
-- Poppers $12.99 | Onion Rings $10.99
-- Calamari $15.99 | Fish & Chips $18.99
-- AllStar Nachos $16.99 | Garlic Bread $9.99
-
-FRIES:
-- Fresh Fries $8.99 | Loaded Fries $14.99
-- Greek Fries $13.99 | Chili Cheese Fries $14.99
-
-SALADS:
-- Garden $10.99 | Caesar $12.99 | Greek $13.99
-
-HOT DOGS:
-- Nathan's Dog $12.99 | Cheese Dog $13.99
-- Chili Cheese Dog $15.99 | AllStar Dog (bacon wrapped) $14.99
-
-KIDS MENU (includes drink & ice cream):
-- Jr. Wings $11.99 | Jr. Tenders $10.99 | Jr. Burger $10.99
-
-DESSERTS:
-- Gelato Bowl $8.99 | Various Cheesecakes $9.99-$11.99
-
-DRINKS:
-- Soft Drink $3.49 | Coffee/Tea $2.99 | Juice $3.99
-
-IMPORTANT:
-- Keep responses brief - this is a phone order
+CRITICAL VOICE RULES:
+- NEVER use markdown formatting (no asterisks, no bold, no headers)
+- Keep responses conversational and brief - this is a phone call
+- Speak naturally like a real person taking a phone order
 - Wing sizes are in POUNDS (1, 2, 3, or 5 pounds) - NOT ounces
-- NEVER mention other restaurants. You are Allstar Wings & Ribs."""
+- NEVER mention other restaurants. You are Allstar Wings & Ribs.
+- Use the get_menu function when customers ask about menu items or prices"""
 }
 
 
@@ -130,17 +84,24 @@ def create_greeting_node() -> NodeConfig:
         "task_messages": [
             {
                 "role": "system",
-                "content": """Greet the customer warmly and ask if they'd like pickup or delivery.
+                "content": """This is a pickup order. The customer just called.
 
-Example: "Hi! Welcome to Allstar Wings and Ribs! Will this be for pickup or delivery today?"
+IMMEDIATELY say: "Hi! Thanks for calling Allstar Wings and Ribs! What can I get for you today?"
 
-After they respond, use the set_order_type function to record their choice."""
+If they ask about the menu, use get_menu to fetch it.
+If they ask about flavors, tell them: Honey Garlic, BBQ, Hot, Mild, Salt and Pepper, Lemon Pepper, Jerk, Suicide, and Cajun.
+If they ask about sizes, wings come in: 1 pound, 2 pounds, 3 pounds, or 5 pounds.
+
+When they say what they want to order, use set_order_type to proceed."""
             }
+        ],
+        "pre_actions": [
+            {"type": "tts_say", "text": "Hi! Thanks for calling Allstar Wings and Ribs! What can I get for you today?"}
         ],
         "functions": [
             {
                 "name": "set_order_type",
-                "description": "Record the customer's order type preference",
+                "description": "Customer is ready to order or mentions what they want",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -152,6 +113,14 @@ After they respond, use the set_order_type function to record their choice."""
                     },
                     "required": ["order_type"]
                 }
+            },
+            {
+                "name": "get_menu",
+                "description": "Get the full menu with items and prices. Use when customer asks about menu or prices.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
             }
         ]
     }
@@ -161,32 +130,19 @@ def create_order_collection_node() -> NodeConfig:
     """Collect menu items from customer."""
     return {
         "name": "order_collection",
+        "role_messages": [ROLE_MESSAGE],
         "task_messages": [
             {
                 "role": "system",
-                "content": """Help the customer build their order.
+                "content": """Help the customer build their order. Use get_menu if they ask about menu items or prices.
 
-MENU:
-- Wings: Lord of the Wing (bone-in) or Boneless Wings
-  Sizes: 1 lb ($12.99), 2 lb ($21.99), 3 lb ($29.99)
-  Flavors: Honey Garlic, BBQ, Hot, Mild, Salt & Pepper, Lemon Pepper, Jerk, Teriyaki, Suicide, Cajun
+ORDERING GUIDELINES:
+- For wings: Ask what SIZE in pounds (1, 2, 3, or 5 pounds) and what FLAVOR they want
+- Wing flavors: Honey Garlic, BBQ, Hot, Mild, Salt and Pepper, Lemon Pepper, Jerk, Suicide, Cajun
+- Confirm each item back naturally after adding
+- When they say "that's it", "that's all", or "no" to "anything else?", use complete_order_collection
 
-- Ribs: Full Rack ($24.99), Half Rack ($14.99), Rib Tips ($12.99)
-  Sauces: House BBQ, Honey Garlic, Jamaican Jerk
-
-- Burgers: Classic ($10.99), Bacon Cheese ($12.99), Mushroom Swiss ($12.99)
-
-- Sides: Fries ($4.99), Onion Rings ($5.99), Coleslaw ($3.99), Caesar Salad ($7.99)
-
-- Drinks: Pop/Soda ($2.49), Bottled Water ($1.99)
-
-GUIDELINES:
-- Ask about wing size if not specified (suggest 2 lb as popular choice)
-- Ask about flavors for wings and sauces for ribs
-- Confirm each item as they add it
-- When they say "that's it" or similar, use complete_order_collection to move on
-
-Use add_item for each item they want."""
+IMPORTANT: Speak naturally, no markdown or special formatting."""
             }
         ],
         "functions": [
@@ -198,7 +154,7 @@ Use add_item for each item they want."""
                     "properties": {
                         "item_name": {
                             "type": "string",
-                            "description": "Menu item name (e.g., 'Lord of the Wing', 'Boneless Wings', 'Full Rack Ribs')"
+                            "description": "Menu item name"
                         },
                         "quantity": {
                             "type": "integer",
@@ -207,7 +163,7 @@ Use add_item for each item they want."""
                         },
                         "size": {
                             "type": "string",
-                            "description": "Size for wings (1 lb, 2 lb, 3 lb)"
+                            "description": "Size for wings (1 lb, 2 lb, 3 lb, 5 lb)"
                         },
                         "modifiers": {
                             "type": "array",
@@ -220,8 +176,11 @@ Use add_item for each item they want."""
             },
             {
                 "name": "get_menu",
-                "description": "Get full menu with prices if customer asks",
-                "parameters": {"type": "object", "properties": {}}
+                "description": "Get full menu with items and prices. Use when customer asks about menu or prices.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
             },
             {
                 "name": "complete_order_collection",

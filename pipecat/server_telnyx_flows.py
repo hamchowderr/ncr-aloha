@@ -86,59 +86,13 @@ ROLE_MESSAGE = {
     "role": "system",
     "content": """You are a friendly voice ordering assistant for Allstar Wings & Ribs restaurant in Richmond Hill.
 
-COMPLETE MENU:
-
-WINGS (sold by the POUND - 1lb, 2lb, 3lb, or 5lb):
-- Original Wings (breaded) - 1lb $16.99, 2lb $30.99, 3lb $44.99, 5lb $68.99
-- Lord of the Wing (non-breaded) - 1lb $17.99, 2lb $31.99, 3lb $45.99, 5lb $69.99
-- Boneless Bites - 1lb $15.99, 2lb $28.99, 3lb $41.99
-- King of the Wing (grilled, skinless) - 1lb $18.99, 2lb $33.99
-- Vegan Cauliflower Wings - $14.99
-Wing Flavors: Plain, Salt & Pepper, Lemon Pepper, Honey Garlic, BBQ, Mild, Medium, Hot, Cajun, Jerk, Suicide, Sweet Chili Thai, Honey BBQ, Chipotle, Mesquite, 5 Alarm, Armageddon
-
-RIBS:
-- Half Rack Pork Side Ribs $19.99 | Full Rack $34.99
-- Half Rack Baby Back Ribs $22.99 | Full Rack $38.99
-- Half Rack Bronto Beef Ribs $26.99 | Full Rack $46.99
-- Wing & Rib Combo $26.99 | Rib Platter $49.99
-Rib Sauces: House BBQ, Chipotle, Honey BBQ, Honey Garlic, Hawaiian BBQ, Jamaican Jerk
-
-BURGERS (all served with fries & coleslaw):
-- The Traditionalist $16.99 | Bacon Cheeseburger $18.99
-- Hot Hawaiian $18.99 | Mehican Burger $19.99
-- Maple Bacon $19.99 | Mozza Burger $20.99
-- The Beast (4 patties) $26.99 | Beyond Meat $19.99
-
-APPETIZERS:
-- Chicken Tenders $15.99 | Mozzarella Sticks $11.99
-- Poppers $12.99 | Onion Rings $10.99
-- Calamari $15.99 | Fish & Chips $18.99
-- AllStar Nachos $16.99 | Garlic Bread $9.99
-
-FRIES:
-- Fresh Fries $8.99 | Loaded Fries $14.99
-- Greek Fries $13.99 | Chili Cheese Fries $14.99
-
-SALADS:
-- Garden $10.99 | Caesar $12.99 | Greek $13.99
-
-HOT DOGS:
-- Nathan's Dog $12.99 | Cheese Dog $13.99
-- Chili Cheese Dog $15.99 | AllStar Dog (bacon wrapped) $14.99
-
-KIDS MENU (includes drink & ice cream):
-- Jr. Wings $11.99 | Jr. Tenders $10.99 | Jr. Burger $10.99
-
-DESSERTS:
-- Gelato Bowl $8.99 | Various Cheesecakes $9.99-$11.99
-
-DRINKS:
-- Soft Drink $3.49 | Coffee/Tea $2.99 | Juice $3.99
-
-IMPORTANT:
-- Keep responses brief - this is a phone order
+CRITICAL VOICE RULES:
+- NEVER use markdown formatting (no asterisks, no bold, no headers)
+- Keep responses conversational and brief - this is a phone call
+- Speak naturally like a real person taking a phone order
 - Wing sizes are in POUNDS (1, 2, 3, or 5 pounds) - NOT ounces
-- NEVER mention other restaurants. You are Allstar Wings & Ribs."""
+- NEVER mention other restaurants. You are Allstar Wings & Ribs.
+- Use the get_menu tool when customers ask about menu items or prices"""
 }
 
 
@@ -174,25 +128,60 @@ class FlowNodeFactory:
             logger.info("Customer ready to order")
             return ("Great! What would you like to order?", factory.create_order_collection_node())
 
+        async def handle_get_menu(args: FlowArgs, flow_manager: FlowManager) -> tuple:
+            """Fetch menu from API and return formatted for voice."""
+            try:
+                menu = await factory.order_client.get_menu()
+                items_by_category = {}
+                for item in menu.get("items", []):
+                    cat = item.get("category", "Other")
+                    if cat not in items_by_category:
+                        items_by_category[cat] = []
+                    items_by_category[cat].append(item)
+
+                # Format for voice - no markdown!
+                result = ["Here's what we have:"]
+                for category, items in items_by_category.items():
+                    result.append(f"For {category}:")
+                    item_names = [item['name'] for item in items[:5]]
+                    result.append(", ".join(item_names) + ".")
+
+                return (" ".join(result) + " What sounds good to you?", None)
+            except Exception as e:
+                logger.error(f"Failed to fetch menu: {e}")
+                # Fallback to basic menu info
+                return ("We have wings, ribs, burgers, appetizers, fries, salads, hot dogs, and more. Our wings are our specialty - they come in one pound, two pounds, three pounds, or five pounds with lots of flavor options. What would you like?", None)
+
         return {
             "name": "greeting",
             "role_messages": [ROLE_MESSAGE],
             "task_messages": [{
                 "role": "system",
-                "content": """Greet the customer warmly. This is a pickup order.
+                "content": """This is a pickup order. The customer just called.
 
-Say: "Hi! Thanks for calling Allstar Wings and Ribs! What can I get for you today?"
+IMMEDIATELY say: "Hi! Thanks for calling Allstar Wings and Ribs! What can I get for you today?"
 
-If they ask about flavors, our wing flavors are: Honey Garlic, BBQ, Hot, Mild, Salt & Pepper, Lemon Pepper, Jerk, Suicide, and Cajun.
+If they ask about the menu, use get_menu to fetch it.
+If they ask about flavors, tell them: Honey Garlic, BBQ, Hot, Mild, Salt and Pepper, Lemon Pepper, Jerk, Suicide, and Cajun.
 If they ask about sizes, wings come in: 1 pound, 2 pounds, 3 pounds, or 5 pounds.
 
-When they start ordering or say what they want, use set_ready_to_order to proceed."""
+When they say what they want to order, use set_ready_to_order to proceed."""
             }],
+            "pre_actions": [
+                {"type": "tts_say", "text": "Hi! Thanks for calling Allstar Wings and Ribs! What can I get for you today?"}
+            ],
             "functions": [
                 FlowsFunctionSchema(
                     name="set_ready_to_order",
                     description="Customer mentions what they want to order or is ready to order",
                     handler=handle_ready_to_order,
+                    properties={},
+                    required=[],
+                ),
+                FlowsFunctionSchema(
+                    name="get_menu",
+                    description="Get the full menu with items and prices. Use when customer asks what's on the menu or asks about prices.",
+                    handler=handle_get_menu,
                     properties={},
                     required=[],
                 )
@@ -212,9 +201,10 @@ When they start ordering or say what they want, use set_ready_to_order to procee
             }
             factory.items.append(item)
 
-            item_desc = f"{item['quantity']}x {item['item_name']}"
+            # Build natural voice response
+            item_desc = f"{item['quantity']} {item['item_name']}"
             if item['size']:
-                item_desc += f" ({item['size']})"
+                item_desc += f", {item['size']}"
             if item['modifiers']:
                 item_desc += f" with {', '.join(item['modifiers'])}"
 
@@ -222,6 +212,7 @@ When they start ordering or say what they want, use set_ready_to_order to procee
             return (f"Got it, {item_desc}. Anything else?", None)  # Stay in same node
 
         async def handle_get_menu(args: FlowArgs, flow_manager: FlowManager) -> tuple:
+            """Fetch menu from API and return formatted for voice."""
             try:
                 menu = await factory.order_client.get_menu()
                 items_by_category = {}
@@ -231,17 +222,17 @@ When they start ordering or say what they want, use set_ready_to_order to procee
                         items_by_category[cat] = []
                     items_by_category[cat].append(item)
 
-                result = ["Here's our menu:"]
+                # Format for voice - no markdown!
+                result = ["Here's what we have:"]
                 for category, items in items_by_category.items():
-                    result.append(f"\n{category}:")
-                    for item in items[:5]:
-                        price = item.get("basePrice", 0)
-                        result.append(f"  {item['name']}: ${price:.2f}")
+                    result.append(f"For {category}:")
+                    item_names = [item['name'] for item in items[:5]]
+                    result.append(", ".join(item_names) + ".")
 
-                return ("\n".join(result), None)
+                return (" ".join(result) + " What would you like?", None)
             except Exception as e:
                 logger.error(f"Failed to fetch menu: {e}")
-                return ("Sorry, I couldn't get the menu. What would you like to order?", None)
+                return ("We have wings, ribs, burgers, appetizers, fries, salads, hot dogs, and more. What would you like?", None)
 
         async def handle_complete_order(args: FlowArgs, flow_manager: FlowManager) -> tuple:
             if not factory.items:
@@ -253,29 +244,15 @@ When they start ordering or say what they want, use set_ready_to_order to procee
             "role_messages": [ROLE_MESSAGE],
             "task_messages": [{
                 "role": "system",
-                "content": """Help the customer build their order.
+                "content": """Help the customer build their order. Use get_menu if they ask about menu items or prices.
 
-DETAILED MENU:
-- Wings: Original Wings (bone-in breaded), Lord of the Wing (bone-in non-breaded), Boneless Bites
-  Sizes (by WEIGHT in POUNDS): 1 pound ($15.99), 2 pounds ($28.99), 3 pounds ($40.99), 5 pounds ($64.99)
-  Flavors: Honey Garlic, BBQ, Hot, Mild, Salt & Pepper, Lemon Pepper, Jerk, Suicide, Cajun
+ORDERING GUIDELINES:
+- For wings: Ask what SIZE in pounds (1, 2, 3, or 5 pounds) and what FLAVOR they want
+- Wing flavors: Honey Garlic, BBQ, Hot, Mild, Salt and Pepper, Lemon Pepper, Jerk, Suicide, Cajun
+- Confirm each item back naturally after adding
+- When they say "that's it", "that's all", or "no" to "anything else?", use complete_order
 
-- Ribs: Full Rack ($26.99), Half Rack ($16.99), Rib Tips ($14.99)
-  Sauces: House BBQ, Honey Garlic, Jamaican Jerk
-
-- Burgers: Classic Burger ($12.99), Bacon Cheese ($14.99), Mushroom Swiss ($14.99)
-
-- Sides: Fries ($5.99), Onion Rings ($6.99), Coleslaw ($4.99), Caesar Salad ($8.99)
-
-- Drinks: Pop/Soda ($2.99), Bottled Water ($2.49)
-
-GUIDELINES:
-- For wings: ALWAYS ask what SIZE in pounds (1, 2, 3, or 5 pounds - recommend 2 pounds as most popular)
-- For wings: ALWAYS ask what FLAVOR they want
-- Confirm each item back to them after adding
-- When they say "that's it", "that's all", "no", or similar, use complete_order to move on
-
-Use add_item for each item. Use get_menu if they ask about prices."""
+IMPORTANT: Speak naturally, no markdown or special formatting."""
             }],
             "functions": [
                 FlowsFunctionSchema(
@@ -305,7 +282,7 @@ Use add_item for each item. Use get_menu if they ask about prices."""
                 ),
                 FlowsFunctionSchema(
                     name="get_menu",
-                    description="Get full menu with prices",
+                    description="Get full menu with items and prices. Use when customer asks about menu or prices.",
                     handler=handle_get_menu,
                     properties={},
                     required=[],
