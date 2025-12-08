@@ -67,6 +67,14 @@ class OrderClient:
         response = await self.client.get(f"{self.base_url}/orders/{order_id}")
         return response.json()
 
+    async def submit_call_metrics(self, metrics: dict) -> dict:
+        """Submit call metrics to the backend API."""
+        response = await self.client.post(
+            f"{self.base_url}/calls",
+            json=metrics,
+        )
+        return response.json()
+
     async def close(self):
         """Close the HTTP client."""
         await self.client.aclose()

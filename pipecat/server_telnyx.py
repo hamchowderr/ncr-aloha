@@ -149,6 +149,23 @@ class CallMetrics:
         if self.order_id:
             logger.info(f"Order ID: {self.order_id}")
 
+    async def submit_to_api(self, order_client: "OrderClient"):
+        """Submit call metrics to the backend API."""
+        try:
+            duration = (self.end_time - self.start_time).total_seconds() if self.end_time else 0
+            await order_client.submit_call_metrics({
+                "sessionId": self.session_id,
+                "fromNumber": self.from_number,
+                "toNumber": self.to_number,
+                "duration": duration,
+                "turnCount": self.turn_count,
+                "orderSubmitted": self.order_submitted,
+                "orderId": self.order_id,
+            })
+            logger.info("Call metrics submitted to API")
+        except Exception as e:
+            logger.error(f"Failed to submit call metrics: {e}")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -429,6 +446,7 @@ async def websocket_handler(websocket: WebSocket):
     finally:
         metrics.end_time = datetime.now()
         metrics.log_summary()
+        await metrics.submit_to_api(order_client)
         await order_client.close()
         if stream_sid in active_calls:
             del active_calls[stream_sid]
