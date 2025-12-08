@@ -18,4 +18,4 @@ COPY *.py ./
 
 EXPOSE 8765
 
-CMD ["python", "server.py"]
+CMD ["python", "server_telnyx.py"]
