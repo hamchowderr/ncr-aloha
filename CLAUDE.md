@@ -144,6 +144,13 @@ Python-based voice AI that connects to the TypeScript API.
 - More predictable ordering experience
 - Requires: `pip install pipecat-flows`
 
+**Telnyx Flows Bot (`server_telnyx_flows.py`):**
+- Combines Telnyx VOIP transport with Pipecat Flows
+- Real phone calls with structured conversation states
+- Same flow: greeting → order_collection → order_confirmation → customer_info → completion
+- Includes transcript tracking and call metrics
+- Enable with `USE_FLOWS=true` in Docker
+
 ### Setup
 
 **Windows (text-based testing only):**
@@ -172,10 +179,13 @@ python test_order.py
 python create_room.py        # Get room URL
 python bot.py <room_url>     # Start the bot
 
-# WSL/Linux/Mac: Telnyx VOIP bot (real phone calls)
-python bot_telnyx.py         # Uses Pipecat runner, listens on port 8765
+# WSL/Linux/Mac: Telnyx VOIP bot (real phone calls, free-form)
+python server_telnyx.py      # Telnyx server with free-form conversation
 
-# WSL/Linux/Mac: Flows-based bot (structured conversation)
+# WSL/Linux/Mac: Telnyx VOIP bot with Flows (structured conversation)
+python server_telnyx_flows.py  # Telnyx server with structured states
+
+# WSL/Linux/Mac: Daily.co Flows-based bot (structured conversation)
 python bot_flows.py <room_url>
 
 # HTTP server for session management (auto-spawns bots on Linux)

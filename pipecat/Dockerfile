@@ -11,11 +11,14 @@ RUN apt-get update && apt-get install -y \
 # Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir 'pipecat-ai[daily,openai,deepgram,cartesia,silero]' daily-python
+RUN pip install --no-cache-dir 'pipecat-ai[daily,openai,deepgram,cartesia,silero]' daily-python pipecat-flows
 
 # Copy application code
 COPY *.py ./
 
 EXPOSE 8765
 
-CMD ["python", "server_telnyx.py"]
+# USE_FLOWS=true to use structured conversation flow, false for free-form
+ENV USE_FLOWS=false
+
+CMD ["sh", "-c", "if [ \"$USE_FLOWS\" = 'true' ]; then python server_telnyx_flows.py; else python server_telnyx.py; fi"]

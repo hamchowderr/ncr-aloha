@@ -27,6 +27,7 @@ services:
       - "8765:8765"
     environment:
       - ORDER_API_URL=http://backend:3000
+      - USE_FLOWS=${USE_FLOWS:-false}  # Set to true for structured conversation flow
     env_file:
       - ./pipecat/.env.production
     depends_on:
