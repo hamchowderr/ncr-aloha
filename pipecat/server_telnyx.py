@@ -35,7 +35,8 @@ import httpx
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMMessagesUpdateFrame, EndTaskFrame, TTSSpeakFrame
+from pipecat.frames.frames import LLMMessagesUpdateFrame, EndTaskFrame, TTSSpeakFrame, TranscriptionFrame, TextFrame
+from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -137,6 +138,19 @@ class CallMetrics:
         self.turn_count = 0
         self.order_submitted = False
         self.order_id = None
+        self.customer_name = None
+        self.customer_phone = None
+        self.transcript = []  # List of {"role": "user"|"assistant", "content": str}
+
+    def add_transcript(self, role: str, content: str):
+        """Add a transcript entry."""
+        self.transcript.append({
+            "role": role,
+            "content": content,
+            "timestamp": datetime.now().isoformat()
+        })
+        if role == "user":
+            self.turn_count += 1
 
     def log_summary(self):
         duration = (self.end_time - self.start_time).total_seconds() if self.end_time else 0
@@ -148,6 +162,8 @@ class CallMetrics:
         logger.info(f"Order: {'Yes' if self.order_submitted else 'No'}")
         if self.order_id:
             logger.info(f"Order ID: {self.order_id}")
+        if self.customer_name:
+            logger.info(f"Customer: {self.customer_name}")
 
     async def submit_to_api(self, order_client: "OrderClient"):
         """Submit call metrics to the backend API."""
@@ -157,14 +173,42 @@ class CallMetrics:
                 "sessionId": self.session_id,
                 "fromNumber": self.from_number,
                 "toNumber": self.to_number,
-                "duration": duration,
+                "durationSeconds": duration,
                 "turnCount": self.turn_count,
                 "orderSubmitted": self.order_submitted,
                 "orderId": self.order_id,
+                "customerName": self.customer_name,
+                "customerPhone": self.customer_phone,
+                "transcript": self.transcript,
             })
             logger.info("Call metrics submitted to API")
         except Exception as e:
             logger.error(f"Failed to submit call metrics: {e}")
+
+
+class TranscriptProcessor(FrameProcessor):
+    """Captures transcription and LLM output for call transcript."""
+
+    def __init__(self, metrics: CallMetrics):
+        super().__init__()
+        self.metrics = metrics
+
+    async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+
+        # Capture user speech (from STT)
+        if isinstance(frame, TranscriptionFrame):
+            if frame.text and frame.text.strip():
+                self.metrics.add_transcript("user", frame.text)
+                logger.debug(f"Transcript [user]: {frame.text}")
+
+        # Capture assistant speech (from LLM -> TTS)
+        if isinstance(frame, TextFrame):
+            if frame.text and frame.text.strip():
+                self.metrics.add_transcript("assistant", frame.text)
+                logger.debug(f"Transcript [assistant]: {frame.text}")
+
+        await self.push_frame(frame, direction)
 
 
 @asynccontextmanager
@@ -342,6 +386,10 @@ async def websocket_handler(websocket: WebSocket):
 
         async def handle_submit_order(params: FunctionCallParams):
             logger.info(f"Function call: {params.function_name} with {params.arguments}")
+            # Capture customer info from the order
+            if params.arguments:
+                metrics.customer_name = params.arguments.get("customerName")
+                metrics.customer_phone = params.arguments.get("customerPhone")
             result = await order_assistant.handle_function_call("submit_order", params.arguments)
             if "ORDER_SUCCESS" in result:
                 metrics.order_submitted = True
@@ -418,10 +466,14 @@ async def websocket_handler(websocket: WebSocket):
         context = OpenAILLMContext(messages, ORDER_FUNCTIONS)
         context_aggregator = llm.create_context_aggregator(context)
 
+        # Create transcript processor to capture conversation
+        transcript_processor = TranscriptProcessor(metrics)
+
         # Build pipeline
         pipeline = Pipeline([
             transport.input(),
             stt,
+            transcript_processor,  # Capture transcripts after STT
             context_aggregator.user(),
             llm,
             tts,
