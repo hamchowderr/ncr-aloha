@@ -59,7 +59,7 @@ async def create_daily_room() -> dict:
             },
             json={
                 "properties": {
-                    "exp": 3600,  # 1 hour expiry
+                    "exp": int(datetime.now().timestamp()) + 3600,  # 1 hour from now (Unix timestamp)
                     "enable_chat": False,
                     "start_video_off": True,
                     "enable_recording": os.getenv("ENABLE_RECORDING", "false").lower() == "true",

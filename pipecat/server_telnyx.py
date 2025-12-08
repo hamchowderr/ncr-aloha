@@ -89,7 +89,7 @@ async def create_daily_room() -> dict:
             },
             json={
                 "properties": {
-                    "exp": 3600,  # 1 hour expiry
+                    "exp": int(datetime.now().timestamp()) + 3600,  # 1 hour from now (Unix timestamp)
                     "enable_chat": False,
                     "start_video_off": True,
                     "enable_recording": os.getenv("ENABLE_RECORDING", "false").lower() == "true",
@@ -404,12 +404,13 @@ async def websocket_handler(websocket: WebSocket):
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, client):
             logger.info("Client connected to pipeline")
-            # Add greeting prompt and trigger LLM response
-            greeting_message = {
-                "role": "user",
-                "content": "[Customer just answered the phone. Give a friendly, natural greeting.]"
-            }
-            await task.queue_frames([LLMMessagesUpdateFrame(messages=[greeting_message], run_llm=True)])
+            # IMPORTANT: Must include system prompt since LLMMessagesUpdateFrame REPLACES context
+            # Without this, the LLM has no idea what restaurant it's supposed to be!
+            greeting_messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": "[Customer just answered the phone. Give a friendly, natural greeting.]"}
+            ]
+            await task.queue_frames([LLMMessagesUpdateFrame(messages=greeting_messages, run_llm=True)])
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(transport, client):
