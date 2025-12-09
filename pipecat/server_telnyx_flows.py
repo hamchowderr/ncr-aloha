@@ -278,7 +278,6 @@ class FlowNodeFactory:
 
         return {
             "name": "order_collection",
-            "role_messages": [ROLE_MESSAGE],
             "task_messages": [{
                 "role": "system",
                 "content": """Take the customers order. For wings, confirm size and flavor. After each item, ask "Anything else?" When they're done, move to confirmation."""
@@ -344,7 +343,6 @@ class FlowNodeFactory:
 
         return {
             "name": "order_confirmation",
-            "role_messages": [ROLE_MESSAGE],
             "task_messages": [{
                 "role": "system",
                 "content": f"""Read back this order naturally and ask if it sounds right:
@@ -427,7 +425,6 @@ class FlowNodeFactory:
 
         return {
             "name": "customer_info",
-            "role_messages": [ROLE_MESSAGE],
             "task_messages": [{
                 "role": "system",
                 "content": """Get the customers name first, then their phone number. Read back the phone number to confirm."""
@@ -474,7 +471,6 @@ class FlowNodeFactory:
 
         return {
             "name": "completion",
-            "role_messages": [ROLE_MESSAGE],
             "task_messages": [{"role": "system", "content": message}],
             "functions": [
                 FlowsFunctionSchema(
