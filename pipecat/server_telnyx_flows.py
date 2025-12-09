@@ -759,16 +759,21 @@ async def websocket_handler(websocket: WebSocket):
             language="en-US",
         )
 
-        # Import Cartesia params for voice control
+        # Cartesia TTS with Sonic-3 for realistic voice
         from pipecat.services.cartesia.tts import CartesiaTTSService
 
+        # Customer Support Lady voice - designed for phone conversations
+        # Alternative voices:
+        #   Customer Support Man: a167e0f3-df7e-4d52-a9c3-f949145efdab
+        #   Helpful Woman: 156fb8d2-335b-4950-9cb3-a2d33befec77
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id=os.getenv("CARTESIA_VOICE_ID", "79a125e8-cd45-4c13-8a67-188112f4dd22"),
-            model="sonic-2024-10-19",  # Use sonic model with speed control
+            voice_id=os.getenv("CARTESIA_VOICE_ID", "829ccd10-f8b3-43cd-b8a0-4aeaa81f3b30"),
+            model="sonic-3",
             sample_rate=8000,
             params=CartesiaTTSService.InputParams(
-                speed="slow",  # Slower, more natural pacing
+                speed=0.95,  # Slightly slower for clarity on phone
+                emotion=["positivity:high"],  # Warm, friendly tone
             ),
         )
 
