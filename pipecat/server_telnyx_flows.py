@@ -144,18 +144,27 @@ class FlowNodeFactory:
             return ("Great! What would you like to order?", factory.create_order_collection_node())
 
         async def handle_get_menu(args: FlowArgs, flow_manager: FlowManager) -> tuple:
-            """Return simplified menu for voice - LLM will speak it."""
-            # Keep it short for voice - just categories and highlights
-            menu_text = """Alright, let me tell you what we got...
+            """Fetch menu categories from API and format for voice."""
+            try:
+                menu = await factory.order_client.get_menu()
+                categories = menu.get("categories", [])
 
-For wings, we have Original Wings, Boneless Bites, and more. Wings come in one, two, three, or five pound sizes with flavors like Honey Garlic, BBQ, Hot, Mild, Lemon Pepper, Jerk, and Cajun.
+                # Format categories for natural speech
+                if categories:
+                    # Join with commas and "and" for last item
+                    if len(categories) > 1:
+                        cat_text = ", ".join(categories[:-1]) + ", and " + categories[-1]
+                    else:
+                        cat_text = categories[0]
 
-For ribs, we have Pork Side Ribs and Baby Back Ribs, half or full rack.
+                    menu_text = f"Alright, let me tell you what we got... We have {cat_text}. Our wings are the specialty, they come in one, two, three, or five pound sizes with flavors like Honey Garlic, BBQ, Hot, Mild, Lemon Pepper, Jerk, and Cajun. What sounds good to you?"
+                else:
+                    menu_text = "We have wings, ribs, burgers, fries, salads, hot dogs, and desserts. Our wings come in one, two, three, or five pound sizes. What sounds good?"
 
-We also have burgers, fries, salads, hot dogs, and desserts.
-
-What sounds good to you?"""
-            return (menu_text, None)
+                return (menu_text, None)
+            except Exception as e:
+                logger.error(f"Failed to fetch menu: {e}")
+                return ("We have wings, ribs, burgers, fries, salads, hot dogs, and more. What would you like?", None)
 
         return {
             "name": "greeting",
@@ -209,9 +218,24 @@ What sounds good to you?"""
             return (f"Got it, {item_desc}. Anything else?", None)  # Stay in same node
 
         async def handle_get_menu(args: FlowArgs, flow_manager: FlowManager) -> tuple:
-            """Return simplified menu for voice."""
-            menu_text = """Sure thing... We have wings in one, two, three, or five pound sizes with flavors like Honey Garlic, BBQ, Hot, Mild, Lemon Pepper, Jerk, and Cajun. We also have ribs, burgers, fries, salads, and hot dogs. What can I get you?"""
-            return (menu_text, None)
+            """Fetch menu categories from API and format for voice."""
+            try:
+                menu = await factory.order_client.get_menu()
+                categories = menu.get("categories", [])
+
+                if categories:
+                    if len(categories) > 1:
+                        cat_text = ", ".join(categories[:-1]) + ", and " + categories[-1]
+                    else:
+                        cat_text = categories[0]
+                    menu_text = f"Sure thing... We have {cat_text}. Wings come in one, two, three, or five pound sizes. What can I get you?"
+                else:
+                    menu_text = "We have wings, ribs, burgers, fries, salads, and more. What can I get you?"
+
+                return (menu_text, None)
+            except Exception as e:
+                logger.error(f"Failed to fetch menu: {e}")
+                return ("We have wings, ribs, burgers, fries, salads, and more. What can I get you?", None)
 
         async def handle_complete_order(args: FlowArgs, flow_manager: FlowManager) -> tuple:
             if not factory.items:
