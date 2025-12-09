@@ -8,7 +8,6 @@ Features:
 - Structured conversation flow with explicit state transitions
 - Telnyx WebSocket transport for real phone calls
 - Call metrics and transcript tracking
-- Daily.co browser voice chat support
 
 Usage:
   1. Start ngrok: ngrok http 8765
@@ -21,7 +20,6 @@ import os
 import sys
 import asyncio
 import uuid
-import subprocess
 from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -95,11 +93,7 @@ async def fetch_and_cache_menu():
 # Store active calls
 active_calls = {}
 
-# Store Daily.co sessions
-daily_sessions = {}
 
-# Bot process references
-bot_processes = {}
 
 
 # ============================================================================
@@ -610,103 +604,6 @@ class TranscriptProcessor(FrameProcessor):
 
 
 # ============================================================================
-# DAILY.CO SUPPORT
-# ============================================================================
-
-async def create_daily_room() -> dict:
-    """Create a Daily.co room for browser voice chat."""
-    api_key = os.getenv("DAILY_API_KEY")
-
-    if not api_key:
-        raise ValueError("DAILY_API_KEY not set in environment")
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "https://api.daily.co/v1/rooms",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "properties": {
-                    "exp": int(datetime.now().timestamp()) + 3600,
-                    "enable_chat": False,
-                    "start_video_off": True,
-                    "enable_recording": os.getenv("ENABLE_RECORDING", "false").lower() == "true",
-                }
-            },
-        )
-        response.raise_for_status()
-        return response.json()
-
-
-async def spawn_daily_bot(room_url: str, session_id: str):
-    """Spawn a Daily.co bot process."""
-    bot_script = "bot_flows.py"  # Use Flows version for Daily too
-    script_path = os.path.join(os.path.dirname(__file__), bot_script)
-
-    bot_env = os.environ.copy()
-    bot_env["ORDER_API_URL"] = "http://backend:3000"
-
-    try:
-        process = subprocess.Popen(
-            [sys.executable, script_path, room_url, "", session_id],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=bot_env,
-        )
-        bot_processes[session_id] = process
-        logger.info(f"Spawned Daily Flows bot for session {session_id} (PID: {process.pid})")
-
-        # Start async task to log subprocess output
-        async def log_subprocess_output():
-            """Monitor subprocess output in background."""
-            import asyncio
-            while process.poll() is None:
-                # Read stdout/stderr without blocking
-                if process.stdout:
-                    try:
-                        line = process.stdout.readline()
-                        if line:
-                            logger.info(f"[Bot {session_id}] {line.decode().strip()}")
-                    except Exception:
-                        pass
-                if process.stderr:
-                    try:
-                        line = process.stderr.readline()
-                        if line:
-                            logger.error(f"[Bot {session_id}] {line.decode().strip()}")
-                    except Exception:
-                        pass
-                await asyncio.sleep(0.1)
-
-            # Log final exit code
-            exit_code = process.poll()
-            logger.info(f"[Bot {session_id}] Process exited with code {exit_code}")
-
-            # Capture any remaining output
-            if process.stdout:
-                remaining = process.stdout.read()
-                if remaining:
-                    for line in remaining.decode().strip().split('\n'):
-                        if line:
-                            logger.info(f"[Bot {session_id}] {line}")
-            if process.stderr:
-                remaining = process.stderr.read()
-                if remaining:
-                    for line in remaining.decode().strip().split('\n'):
-                        if line:
-                            logger.error(f"[Bot {session_id}] {line}")
-
-        asyncio.create_task(log_subprocess_output())
-
-        return process.pid
-    except Exception as e:
-        logger.error(f"Failed to spawn Daily bot: {e}")
-        return None
-
-
-# ============================================================================
 # FASTAPI APPLICATION
 # ============================================================================
 
@@ -1008,93 +905,6 @@ async def list_calls():
             for sid, m in active_calls.items()
         ]
     }
-
-
-# ==========================================
-# Daily.co Browser Voice Chat Endpoints
-# ==========================================
-
-@app.post("/sessions")
-async def create_session(request: Request):
-    """Create a new Daily.co voice session for browser chat."""
-    try:
-        room = await create_daily_room()
-        room_url = room.get("url")
-        room_name = room.get("name")
-
-        if not room_url:
-            return {"error": "Failed to create room", "details": room}
-
-        session_id = str(uuid.uuid4())
-        bot_pid = await spawn_daily_bot(room_url, session_id)
-
-        daily_sessions[session_id] = {
-            "session_id": session_id,
-            "room_url": room_url,
-            "room_name": room_name,
-            "status": "bot_running" if bot_pid else "waiting_for_bot",
-            "bot_pid": bot_pid,
-            "created_at": datetime.now().isoformat(),
-        }
-
-        logger.info(f"Daily session created: {session_id} (room: {room_name})")
-
-        return {
-            "session_id": session_id,
-            "room_url": room_url,
-            "room_name": room_name,
-            "status": daily_sessions[session_id]["status"],
-        }
-
-    except httpx.HTTPStatusError as e:
-        logger.error(f"Daily API error: {e}")
-        return {"error": "Failed to create Daily.co room", "details": str(e)}
-    except Exception as e:
-        logger.error(f"Session creation error: {e}")
-        return {"error": str(e)}
-
-
-@app.get("/sessions/{session_id}")
-async def get_session(session_id: str):
-    """Get the status of a Daily.co voice session."""
-    if session_id not in daily_sessions:
-        return {"error": "Session not found"}
-
-    session = daily_sessions[session_id]
-
-    if session.get("bot_pid") and session_id in bot_processes:
-        process = bot_processes[session_id]
-        if process.poll() is not None:
-            session["status"] = "completed"
-            session["exit_code"] = process.returncode
-
-    return session
-
-
-@app.delete("/sessions/{session_id}")
-async def end_session(session_id: str):
-    """End a Daily.co voice session."""
-    if session_id not in daily_sessions:
-        return {"error": "Session not found"}
-
-    if session_id in bot_processes:
-        process = bot_processes[session_id]
-        if process.poll() is None:
-            process.terminate()
-            logger.info(f"Terminated Daily bot for session {session_id}")
-
-    daily_sessions[session_id]["status"] = "ended"
-
-    return {
-        "session_id": session_id,
-        "status": "ended"
-    }
-
-
-@app.get("/sessions")
-async def list_sessions():
-    """List all Daily.co voice sessions."""
-    return {"sessions": list(daily_sessions.values())}
 
 
 if __name__ == "__main__":
