@@ -448,14 +448,14 @@ async def main(room_url: str, token: str = None, session_id: str = None):
         model="gpt-4o-mini",
     )
 
-    # Cartesia TTS with Sonic-3 for realistic voice
+    # Cartesia TTS with Sonic for realistic voice
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id=os.getenv("CARTESIA_VOICE_ID"),
         model="sonic-2024-10-19",
         params=CartesiaTTSService.InputParams(
             language="en",
-            speed=1.0,
+            speed="normal",
             emotion=["positivity:high", "curiosity:medium"],
         ),
     )
