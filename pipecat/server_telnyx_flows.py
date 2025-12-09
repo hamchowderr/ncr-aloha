@@ -68,6 +68,30 @@ logger.add(sys.stderr, level="DEBUG")
 # Get the public URL
 PUBLIC_URL = os.getenv("PUBLIC_URL", "")
 
+# Cached menu data - fetched once at startup
+CACHED_MENU = None
+
+
+async def fetch_and_cache_menu():
+    """Fetch menu from API and cache it globally."""
+    global CACHED_MENU
+    order_api_url = os.getenv("ORDER_API_URL", "http://localhost:3000")
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(f"{order_api_url}/menu")
+            response.raise_for_status()
+            CACHED_MENU = response.json()
+            logger.info(f"Menu cached successfully: {len(CACHED_MENU.get('items', []))} items, {len(CACHED_MENU.get('categories', []))} categories")
+    except Exception as e:
+        logger.error(f"Failed to fetch menu at startup: {e}")
+        # Set a fallback menu structure
+        CACHED_MENU = {
+            "categories": ["Wings", "Ribs", "Burgers", "Fries", "Salads", "Hot Dogs", "Desserts"],
+            "items": []
+        }
+        logger.warning("Using fallback menu categories")
+
 # Store active calls
 active_calls = {}
 
@@ -144,27 +168,31 @@ class FlowNodeFactory:
             return ("Great! What would you like to order?", factory.create_order_collection_node())
 
         async def handle_get_menu(args: FlowArgs, flow_manager: FlowManager) -> tuple:
-            """Fetch menu categories from API and format for voice."""
-            try:
-                menu = await factory.order_client.get_menu()
-                categories = menu.get("categories", [])
+            """Return cached menu categories formatted for voice."""
+            global CACHED_MENU
+            categories = CACHED_MENU.get("categories", []) if CACHED_MENU else []
 
-                # Format categories for natural speech
-                if categories:
-                    # Join with commas and "and" for last item
-                    if len(categories) > 1:
-                        cat_text = ", ".join(categories[:-1]) + ", and " + categories[-1]
-                    else:
-                        cat_text = categories[0]
+            # Format categories for natural speech - separate main items from Kids Menu
+            if categories:
+                # Filter out Kids Menu to mention separately
+                main_cats = [c for c in categories if c.lower() != "kids menu"]
+                has_kids_menu = any(c.lower() == "kids menu" for c in categories)
 
-                    menu_text = f"Alright, let me tell you what we got... We have {cat_text}. Our wings are the specialty, they come in one, two, three, or five pound sizes with flavors like Honey Garlic, BBQ, Hot, Mild, Lemon Pepper, Jerk, and Cajun. What sounds good to you?"
+                if len(main_cats) > 1:
+                    cat_text = ", ".join(main_cats[:-1]) + ", and " + main_cats[-1]
+                elif main_cats:
+                    cat_text = main_cats[0]
                 else:
-                    menu_text = "We have wings, ribs, burgers, fries, salads, hot dogs, and desserts. Our wings come in one, two, three, or five pound sizes. What sounds good?"
+                    cat_text = "wings, ribs, burgers, and more"
 
-                return (menu_text, None)
-            except Exception as e:
-                logger.error(f"Failed to fetch menu: {e}")
-                return ("We have wings, ribs, burgers, fries, salads, hot dogs, and more. What would you like?", None)
+                menu_text = f"We have {cat_text}."
+                if has_kids_menu:
+                    menu_text += " We also have a Kids Menu as well."
+                menu_text += " Our wings are the specialty, they come in one, two, three, or five pound sizes. What sounds good to you?"
+            else:
+                menu_text = "We have wings, ribs, burgers, fries, salads, hot dogs, and desserts. We also have a Kids Menu as well. Our wings come in one, two, three, or five pound sizes. What sounds good?"
+
+            return (menu_text, None)
 
         return {
             "name": "greeting",
@@ -218,24 +246,30 @@ class FlowNodeFactory:
             return (f"Got it, {item_desc}. Anything else?", None)  # Stay in same node
 
         async def handle_get_menu(args: FlowArgs, flow_manager: FlowManager) -> tuple:
-            """Fetch menu categories from API and format for voice."""
-            try:
-                menu = await factory.order_client.get_menu()
-                categories = menu.get("categories", [])
+            """Return cached menu categories formatted for voice."""
+            global CACHED_MENU
+            categories = CACHED_MENU.get("categories", []) if CACHED_MENU else []
 
-                if categories:
-                    if len(categories) > 1:
-                        cat_text = ", ".join(categories[:-1]) + ", and " + categories[-1]
-                    else:
-                        cat_text = categories[0]
-                    menu_text = f"Sure thing... We have {cat_text}. Wings come in one, two, three, or five pound sizes. What can I get you?"
+            if categories:
+                # Filter out Kids Menu to mention separately
+                main_cats = [c for c in categories if c.lower() != "kids menu"]
+                has_kids_menu = any(c.lower() == "kids menu" for c in categories)
+
+                if len(main_cats) > 1:
+                    cat_text = ", ".join(main_cats[:-1]) + ", and " + main_cats[-1]
+                elif main_cats:
+                    cat_text = main_cats[0]
                 else:
-                    menu_text = "We have wings, ribs, burgers, fries, salads, and more. What can I get you?"
+                    cat_text = "wings, ribs, burgers, and more"
 
-                return (menu_text, None)
-            except Exception as e:
-                logger.error(f"Failed to fetch menu: {e}")
-                return ("We have wings, ribs, burgers, fries, salads, and more. What can I get you?", None)
+                menu_text = f"We have {cat_text}."
+                if has_kids_menu:
+                    menu_text += " We also have a Kids Menu."
+                menu_text += " What can I get you?"
+            else:
+                menu_text = "We have wings, ribs, burgers, fries, salads, and more. What can I get you?"
+
+            return (menu_text, None)
 
         async def handle_complete_order(args: FlowArgs, flow_manager: FlowManager) -> tuple:
             if not factory.items:
@@ -626,6 +660,11 @@ async def lifespan(app: FastAPI):
         logger.info(f"WebSocket endpoint: {PUBLIC_URL}/ws")
     else:
         logger.warning("PUBLIC_URL not set. Run ngrok and set PUBLIC_URL env var.")
+
+    # Fetch and cache menu data at startup
+    logger.info("Fetching menu data...")
+    await fetch_and_cache_menu()
+
     yield
     logger.info("Shutting down...")
 
@@ -647,7 +686,10 @@ async def health():
     return {
         "status": "ok",
         "flows_enabled": FLOWS_AVAILABLE,
-        "active_calls": len(active_calls)
+        "active_calls": len(active_calls),
+        "menu_cached": CACHED_MENU is not None,
+        "menu_categories": len(CACHED_MENU.get("categories", [])) if CACHED_MENU else 0,
+        "menu_items": len(CACHED_MENU.get("items", [])) if CACHED_MENU else 0,
     }
 
 
