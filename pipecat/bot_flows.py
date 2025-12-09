@@ -10,7 +10,7 @@ Features:
 - Comprehensive error handling and recovery
 - Call metrics and observability
 
-NOTE: Requires pipecat-flows package: pip install pipecat-flows
+NOTE: Requires pipecat-flows package: pip install pipecat-ai-flows
 """
 
 import os
@@ -24,16 +24,17 @@ from pipecat.frames.frames import EndFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.services.deepgram import DeepgramSTTService
-from pipecat.services.elevenlabs import ElevenLabsTTSService
-from pipecat.services.openai import OpenAILLMService
+from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.transports.daily.transport import DailyParams, DailyTransport
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 
 # Try to import Pipecat Flows
 try:
-    from pipecat_flows import FlowManager, FlowArgs, NodeConfig
+    from pipecat_flows import FlowManager, FlowArgs, NodeConfig, FlowsFunctionSchema
     FLOWS_AVAILABLE = True
 except ImportError:
     FLOWS_AVAILABLE = False
@@ -59,7 +60,7 @@ logger = logging.getLogger("voice-bot-flows")
 
 
 # ============================================================================
-# CONVERSATION FLOW NODES
+# CONVERSATION FLOW NODES - Using new pipecat-flows API with FlowsFunctionSchema
 # ============================================================================
 
 ROLE_MESSAGE = {
@@ -88,376 +89,306 @@ EXAMPLE NATURAL RESPONSES:
 }
 
 
-def create_greeting_node() -> NodeConfig:
-    """Initial greeting and order type collection."""
-    return {
-        "name": "greeting",
-        "role_messages": [ROLE_MESSAGE],
-        "task_messages": [
-            {
-                "role": "system",
-                "content": """The customer just called. This is a pickup order.
-
-WAIT for the greeting to finish, then listen to what they say.
-
-If they ask about the menu, use get_menu to fetch it.
-If they ask about flavors, tell them: Honey Garlic, BBQ, Hot, Mild, Salt and Pepper, Lemon Pepper, Jerk, Suicide, and Cajun.
-If they ask about sizes, wings come in: 1 pound, 2 pounds, 3 pounds, or 5 pounds.
-
-When they say what they want to order, use set_order_type to proceed.
-
-Remember: Be patient, don't rush them."""
-            }
-        ],
-        "pre_actions": [
-            {"type": "tts_say", "text": "Hi there! Thanks for calling Allstar Wings and Ribs. What can I get for you?"}
-        ],
-        "functions": [
-            {
-                "name": "set_order_type",
-                "description": "Customer is ready to order or mentions what they want",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "order_type": {
-                            "type": "string",
-                            "enum": ["pickup", "delivery"],
-                            "description": "Whether customer wants pickup or delivery"
-                        }
-                    },
-                    "required": ["order_type"]
-                }
-            },
-            {
-                "name": "get_menu",
-                "description": "Get the full menu with items and prices. Use when customer asks about menu or prices.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {}
-                }
-            }
-        ]
-    }
-
-
-def create_order_collection_node() -> NodeConfig:
-    """Collect menu items from customer."""
-    return {
-        "name": "order_collection",
-        "role_messages": [ROLE_MESSAGE],
-        "task_messages": [
-            {
-                "role": "system",
-                "content": """Help the customer build their order. Use get_menu if they ask about menu items or prices.
-
-ORDERING GUIDELINES:
-- For wings: Ask what SIZE in pounds (1, 2, 3, or 5 pounds) and what FLAVOR they want
-- Wing flavors: Honey Garlic, BBQ, Hot, Mild, Salt and Pepper, Lemon Pepper, Jerk, Suicide, Cajun
-- Confirm each item back naturally after adding
-- When they say "that's it", "that's all", or "no" to "anything else?", use complete_order_collection
-
-IMPORTANT: Speak naturally, no markdown or special formatting."""
-            }
-        ],
-        "functions": [
-            {
-                "name": "add_item",
-                "description": "Add an item to the order",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "item_name": {
-                            "type": "string",
-                            "description": "Menu item name"
-                        },
-                        "quantity": {
-                            "type": "integer",
-                            "description": "Number of this item",
-                            "default": 1
-                        },
-                        "size": {
-                            "type": "string",
-                            "description": "Size for wings (1 lb, 2 lb, 3 lb, 5 lb)"
-                        },
-                        "modifiers": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Flavors, sauces, or modifications"
-                        }
-                    },
-                    "required": ["item_name"]
-                }
-            },
-            {
-                "name": "get_menu",
-                "description": "Get full menu with items and prices. Use when customer asks about menu or prices.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {}
-                }
-            },
-            {
-                "name": "complete_order_collection",
-                "description": "Move to order confirmation when customer is done adding items",
-                "parameters": {"type": "object", "properties": {}}
-            }
-        ]
-    }
-
-
-def create_order_confirmation_node(items: list) -> NodeConfig:
-    """Confirm the complete order with customer."""
-    items_text = "\n".join([
-        f"- {item.get('quantity', 1)}x {item.get('item_name')}" +
-        (f" ({item.get('size')})" if item.get('size') else "") +
-        (f" - {', '.join(item.get('modifiers', []))}" if item.get('modifiers') else "")
-        for item in items
-    ])
-
-    return {
-        "name": "order_confirmation",
-        "task_messages": [
-            {
-                "role": "system",
-                "content": f"""Read back the order and ask customer to confirm:
-
-ORDER:
-{items_text}
-
-Say something like: "Let me read that back to you: [order items]. Does that sound right?"
-
-If they want to change something, use modify_order.
-If they confirm, use confirm_order to proceed to collecting their information."""
-            }
-        ],
-        "functions": [
-            {
-                "name": "modify_order",
-                "description": "Go back to modify the order",
-                "parameters": {"type": "object", "properties": {}}
-            },
-            {
-                "name": "confirm_order",
-                "description": "Customer confirmed the order - proceed to collect their info",
-                "parameters": {"type": "object", "properties": {}}
-            }
-        ]
-    }
-
-
-def create_customer_info_node() -> NodeConfig:
-    """Collect customer name and phone number."""
-    return {
-        "name": "customer_info",
-        "task_messages": [
-            {
-                "role": "system",
-                "content": """Collect the customer's name and phone number for the order.
-
-Ask for their name first, then their phone number.
-Read back the phone number to confirm.
-
-When you have both, use set_customer_info to record them."""
-            }
-        ],
-        "functions": [
-            {
-                "name": "set_customer_info",
-                "description": "Record customer name and phone",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "Customer's name"
-                        },
-                        "phone": {
-                            "type": "string",
-                            "description": "Customer's phone number"
-                        }
-                    },
-                    "required": ["name", "phone"]
-                }
-            }
-        ]
-    }
-
-
-def create_completion_node(order_result: dict) -> NodeConfig:
-    """Final confirmation and goodbye."""
-    success = order_result.get("success", False)
-    order_id = order_result.get("orderId", "")[:8] if order_result.get("orderId") else ""
-
-    if success:
-        message = f"""The order has been placed successfully! Order number: {order_id}
-
-Thank the customer and give them an estimated time:
-- Pickup: about 15-20 minutes
-- Delivery: about 30-45 minutes
-
-Then say goodbye warmly."""
-    else:
-        errors = ", ".join(order_result.get("errors", ["Unknown error"]))
-        message = f"""There was a problem with the order: {errors}
-
-Apologize to the customer and offer to try again or suggest they call back."""
-
-    return {
-        "name": "completion",
-        "task_messages": [
-            {
-                "role": "system",
-                "content": message
-            }
-        ],
-        "functions": [
-            {
-                "name": "end_call",
-                "description": "End the call after saying goodbye",
-                "parameters": {"type": "object", "properties": {}}
-            }
-        ]
-    }
-
-
 # ============================================================================
-# FLOW MANAGER WITH ORDER STATE
+# NODE FACTORY CLASS - Creates nodes with embedded handlers (new API)
 # ============================================================================
 
-class OrderFlowManager:
-    """Manages conversation flow and order state."""
+class FlowNodeFactory:
+    """Creates flow nodes with proper handlers for the new pipecat-flows API."""
 
     def __init__(self, order_client: OrderClient):
         self.order_client = order_client
-        self.flow_manager: Optional[FlowManager] = None
-
-        # Order state
-        self.order_type = "pickup"
         self.items = []
         self.customer_name = ""
         self.customer_phone = ""
         self.order_result = None
+        self.flow_manager = None
+        self.task = None
 
-    async def initialize(self, flow_manager: FlowManager):
-        """Initialize with FlowManager and start greeting."""
+    def set_refs(self, flow_manager, task):
+        """Set references needed for ending calls."""
         self.flow_manager = flow_manager
+        self.task = task
 
-        # Store reference to this manager in flow state
-        flow_manager.state["order_manager"] = self
+    def create_greeting_node(self) -> NodeConfig:
+        """Initial greeting node."""
+        factory = self  # Capture reference for closure
 
-    async def handle_set_order_type(self, args: FlowArgs) -> tuple:
-        """Handle order type selection."""
-        self.order_type = args.get("order_type", "pickup")
-        logger.info(f"Order type set to: {self.order_type}")
-        return f"Got it, this will be for {self.order_type}.", create_order_collection_node()
+        async def handle_ready_to_order(args: FlowArgs, flow_manager: FlowManager) -> tuple:
+            logger.info("Customer ready to order")
+            return ("Great! What would you like to order?", factory.create_order_collection_node())
 
-    async def handle_add_item(self, args: FlowArgs) -> tuple:
-        """Add item to order."""
-        item = {
-            "item_name": args.get("item_name", ""),
-            "quantity": args.get("quantity", 1),
-            "size": args.get("size"),
-            "modifiers": args.get("modifiers", [])
-        }
-        self.items.append(item)
+        async def handle_get_menu(args: FlowArgs, flow_manager: FlowManager) -> tuple:
+            """Fetch menu and return it."""
+            try:
+                menu = await factory.order_client.get_menu()
+                categories = menu.get("categories", [])
+                if categories:
+                    cat_text = ", ".join(categories[:-1]) + ", and " + categories[-1] if len(categories) > 1 else categories[0]
+                    menu_text = f"We have {cat_text}. Our wings are the specialty, they come in one, two, three, or five pound sizes. What sounds good to you?"
+                else:
+                    menu_text = "We have wings, ribs, burgers, fries, salads, and desserts. Our wings come in one, two, three, or five pound sizes. What sounds good?"
+                return (menu_text, None)
+            except Exception as e:
+                logger.error(f"Failed to fetch menu: {e}")
+                return ("We have wings, ribs, burgers, and more. Our wings come in one, two, three, or five pound sizes. What sounds good?", None)
 
-        # Format confirmation
-        item_desc = f"{item['quantity']}x {item['item_name']}"
-        if item['size']:
-            item_desc += f" ({item['size']})"
-        if item['modifiers']:
-            item_desc += f" with {', '.join(item['modifiers'])}"
-
-        logger.info(f"Added item: {item_desc}")
-        return f"Added {item_desc} to your order. What else can I get you?", None  # Stay in same node
-
-    async def handle_get_menu(self, args: FlowArgs) -> tuple:
-        """Fetch and return menu."""
-        try:
-            menu = await self.order_client.get_menu()
-            # Format for voice
-            items_by_category = {}
-            for item in menu.get("items", []):
-                cat = item.get("category", "Other")
-                if cat not in items_by_category:
-                    items_by_category[cat] = []
-                items_by_category[cat].append(item)
-
-            result = ["Here's our menu:"]
-            for category, items in items_by_category.items():
-                result.append(f"\n{category}:")
-                for item in items[:5]:
-                    price = item.get("basePrice", 0)
-                    result.append(f"  {item['name']}: ${price:.2f}")
-
-            return "\n".join(result), None
-        except Exception as e:
-            logger.error(f"Failed to fetch menu: {e}")
-            return "Sorry, I couldn't fetch the menu right now. What would you like to order?", None
-
-    async def handle_complete_order_collection(self, args: FlowArgs) -> tuple:
-        """Move to order confirmation."""
-        if not self.items:
-            return "You haven't added any items yet. What would you like to order?", None
-
-        return "Let me confirm your order.", create_order_confirmation_node(self.items)
-
-    async def handle_modify_order(self, args: FlowArgs) -> tuple:
-        """Go back to order collection."""
-        return "No problem, what would you like to change?", create_order_collection_node()
-
-    async def handle_confirm_order(self, args: FlowArgs) -> tuple:
-        """Order confirmed, get customer info."""
-        return "Great! Now I just need your name and phone number.", create_customer_info_node()
-
-    async def handle_set_customer_info(self, args: FlowArgs) -> tuple:
-        """Set customer info and submit order."""
-        self.customer_name = args.get("name", "")
-        self.customer_phone = args.get("phone", "")
-
-        logger.info(f"Customer: {self.customer_name}, Phone: {self.customer_phone}")
-
-        # Submit order
-        try:
-            order = VoiceOrder(
-                orderType=self.order_type,
-                items=[
-                    OrderItem(
-                        itemName=item["item_name"],
-                        quantity=item.get("quantity", 1),
-                        size=item.get("size"),
-                        modifiers=item.get("modifiers", [])
-                    )
-                    for item in self.items
-                ],
-                customer=Customer(
-                    name=self.customer_name,
-                    phone=self.customer_phone
+        return {
+            "name": "greeting",
+            "role_messages": [ROLE_MESSAGE],
+            "task_messages": [{
+                "role": "system",
+                "content": """This is a pickup order. Listen to what the customer wants.
+If they ask about the menu, use get_menu.
+When they mention what they want to order, use set_ready_to_order."""
+            }],
+            "pre_actions": [
+                {"type": "tts_say", "text": "Hi there! Thanks for calling Allstar Wings and Ribs. What can I get for you?"}
+            ],
+            "functions": [
+                FlowsFunctionSchema(
+                    name="set_ready_to_order",
+                    description="Customer mentions a food item they want to order or says they're ready to order",
+                    handler=handle_ready_to_order,
+                    properties={},
+                    required=[],
+                ),
+                FlowsFunctionSchema(
+                    name="get_menu",
+                    description="Customer asks about the menu, what you have, or prices",
+                    handler=handle_get_menu,
+                    properties={},
+                    required=[],
                 )
-            )
+            ],
+        }
 
-            result = await self.order_client.submit_order(order)
-            self.order_result = {
-                "success": result.success,
-                "orderId": result.orderId,
-                "errors": result.errors,
-                "warnings": result.warnings
+    def create_order_collection_node(self) -> NodeConfig:
+        """Order collection node."""
+        factory = self
+
+        async def handle_add_item(args: FlowArgs, flow_manager: FlowManager) -> tuple:
+            item = {
+                "item_name": args.get("item_name", ""),
+                "quantity": args.get("quantity", 1),
+                "size": args.get("size"),
+                "modifiers": args.get("modifiers", [])
             }
+            factory.items.append(item)
 
-            logger.info(f"Order submitted: {self.order_result}")
+            # Build natural voice response
+            item_desc = f"{item['quantity']} {item['item_name']}"
+            if item['size']:
+                item_desc += f", {item['size']}"
+            if item['modifiers']:
+                item_desc += f" with {', '.join(item['modifiers'])}"
 
-        except Exception as e:
-            logger.error(f"Order submission failed: {e}")
-            self.order_result = {
-                "success": False,
-                "errors": [str(e)]
-            }
+            logger.info(f"Added item: {item_desc}")
+            return (f"Got it, {item_desc}. Anything else?", None)  # Stay in same node
 
-        return "Submitting your order now...", create_completion_node(self.order_result)
+        async def handle_get_menu(args: FlowArgs, flow_manager: FlowManager) -> tuple:
+            try:
+                menu = await factory.order_client.get_menu()
+                categories = menu.get("categories", [])
+                if categories:
+                    cat_text = ", ".join(categories[:-1]) + ", and " + categories[-1] if len(categories) > 1 else categories[0]
+                    menu_text = f"We have {cat_text}. Our wings come in one, two, three, or five pound sizes."
+                else:
+                    menu_text = "We have wings, ribs, burgers, fries, salads, and desserts."
+                return (menu_text, None)
+            except Exception as e:
+                logger.error(f"Failed to fetch menu: {e}")
+                return ("We have wings, ribs, burgers, and more.", None)
 
-    async def handle_end_call(self, args: FlowArgs) -> tuple:
-        """Signal end of call."""
-        return "END_CALL", None
+        async def handle_complete_order(args: FlowArgs, flow_manager: FlowManager) -> tuple:
+            if not factory.items:
+                return ("You haven't ordered anything yet. What would you like?", None)
+            return ("Let me confirm your order.", factory.create_order_confirmation_node())
+
+        return {
+            "name": "order_collection",
+            "task_messages": [{
+                "role": "system",
+                "content": """Take the customer's order. For wings, confirm size and flavor.
+After each item, ask "Anything else?"
+When they're done ordering, use complete_order."""
+            }],
+            "functions": [
+                FlowsFunctionSchema(
+                    name="add_item",
+                    description="Add an item to the order",
+                    handler=handle_add_item,
+                    properties={
+                        "item_name": {"type": "string", "description": "Menu item name"},
+                        "quantity": {"type": "integer", "description": "Number of items", "default": 1},
+                        "size": {"type": "string", "description": "Size (e.g., 1 lb, 2 lb for wings)"},
+                        "modifiers": {"type": "array", "items": {"type": "string"}, "description": "Flavors or modifications"}
+                    },
+                    required=["item_name"],
+                ),
+                FlowsFunctionSchema(
+                    name="get_menu",
+                    description="Customer asks about menu or prices",
+                    handler=handle_get_menu,
+                    properties={},
+                    required=[],
+                ),
+                FlowsFunctionSchema(
+                    name="complete_order",
+                    description="Customer says they're done ordering (e.g., 'that's it', 'that's all', 'no' to anything else)",
+                    handler=handle_complete_order,
+                    properties={},
+                    required=[],
+                ),
+            ],
+        }
+
+    def create_order_confirmation_node(self) -> NodeConfig:
+        """Order confirmation node."""
+        factory = self
+
+        items_text = "\n".join([
+            f"- {item.get('quantity', 1)}x {item.get('item_name')}" +
+            (f" ({item.get('size')})" if item.get('size') else "") +
+            (f" - {', '.join(item.get('modifiers', []))}" if item.get('modifiers') else "")
+            for item in factory.items
+        ])
+
+        async def handle_modify_order(args: FlowArgs, flow_manager: FlowManager) -> tuple:
+            return ("No problem, what would you like to change?", factory.create_order_collection_node())
+
+        async def handle_confirm_order(args: FlowArgs, flow_manager: FlowManager) -> tuple:
+            return ("Perfect! Now I just need your name and phone number.", factory.create_customer_info_node())
+
+        return {
+            "name": "order_confirmation",
+            "task_messages": [{
+                "role": "system",
+                "content": f"""Read back this order naturally and ask if it sounds right:
+{items_text}"""
+            }],
+            "functions": [
+                FlowsFunctionSchema(
+                    name="modify_order",
+                    description="Customer wants to change something",
+                    handler=handle_modify_order,
+                    properties={},
+                    required=[],
+                ),
+                FlowsFunctionSchema(
+                    name="confirm_order",
+                    description="Customer confirms the order is correct",
+                    handler=handle_confirm_order,
+                    properties={},
+                    required=[],
+                ),
+            ],
+        }
+
+    def create_customer_info_node(self) -> NodeConfig:
+        """Customer info collection node."""
+        factory = self
+
+        async def handle_set_customer_info(args: FlowArgs, flow_manager: FlowManager) -> tuple:
+            factory.customer_name = args.get("name", "")
+            factory.customer_phone = args.get("phone", "")
+            logger.info(f"Customer: {factory.customer_name}, Phone: {factory.customer_phone}")
+
+            # Submit order
+            try:
+                order = VoiceOrder(
+                    orderType="pickup",
+                    items=[
+                        OrderItem(
+                            itemName=item["item_name"],
+                            quantity=item.get("quantity", 1),
+                            size=item.get("size"),
+                            modifiers=item.get("modifiers", [])
+                        )
+                        for item in factory.items
+                    ],
+                    customer=Customer(
+                        name=factory.customer_name,
+                        phone=factory.customer_phone
+                    )
+                )
+
+                result = await factory.order_client.submit_order(order)
+                factory.order_result = {
+                    "success": result.success,
+                    "orderId": result.orderId,
+                    "errors": result.errors,
+                    "warnings": result.warnings
+                }
+                logger.info(f"Order submitted: {factory.order_result}")
+
+            except Exception as e:
+                logger.error(f"Order submission failed: {e}")
+                factory.order_result = {
+                    "success": False,
+                    "errors": [str(e)]
+                }
+
+            return ("Submitting your order now...", factory.create_completion_node())
+
+        return {
+            "name": "customer_info",
+            "task_messages": [{
+                "role": "system",
+                "content": "Get the customer's name first, then their phone number. Read back the phone number to confirm."
+            }],
+            "functions": [
+                FlowsFunctionSchema(
+                    name="set_customer_info",
+                    description="Record customer name and phone number",
+                    handler=handle_set_customer_info,
+                    properties={
+                        "name": {"type": "string", "description": "Customer's name"},
+                        "phone": {"type": "string", "description": "Customer's phone number"}
+                    },
+                    required=["name", "phone"],
+                ),
+            ],
+        }
+
+    def create_completion_node(self) -> NodeConfig:
+        """Final completion node."""
+        factory = self
+
+        success = factory.order_result.get("success", False) if factory.order_result else False
+        order_id = factory.order_result.get("orderId", "")[:8] if factory.order_result and factory.order_result.get("orderId") else ""
+
+        if success:
+            message = f"Order placed! Order number is {order_id}. It'll be ready in about 15-20 minutes. Thanks for calling!"
+        else:
+            errors = ", ".join(factory.order_result.get("errors", ["Unknown error"])) if factory.order_result else "Unknown error"
+            message = f"Sorry, there was a problem: {errors}. Please try again or call back."
+
+        async def handle_end_call(args: FlowArgs, flow_manager: FlowManager) -> tuple:
+            logger.info("Call ending")
+            if factory.task:
+                await factory.task.queue_frames([EndFrame()])
+            return ("Goodbye!", None)
+
+        return {
+            "name": "completion",
+            "pre_actions": [
+                {"type": "tts_say", "text": message}
+            ],
+            "task_messages": [{
+                "role": "system",
+                "content": "Say goodbye warmly and end the call."
+            }],
+            "functions": [
+                FlowsFunctionSchema(
+                    name="end_call",
+                    description="End the call after saying goodbye",
+                    handler=handle_end_call,
+                    properties={},
+                    required=[],
+                ),
+            ],
+        }
 
 
 # ============================================================================
@@ -468,7 +399,7 @@ async def main(room_url: str, token: str = None, session_id: str = None):
     """Run the voice ordering bot with Pipecat Flows."""
 
     if not FLOWS_AVAILABLE:
-        logger.error("pipecat-flows not installed. Run: pip install pipecat-flows")
+        logger.error("pipecat-flows not installed. Run: pip install pipecat-ai-flows")
         return
 
     session_id = session_id or datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -478,25 +409,18 @@ async def main(room_url: str, token: str = None, session_id: str = None):
     order_client = OrderClient(
         base_url=os.getenv("ORDER_API_URL", "http://localhost:3000")
     )
-    order_manager = OrderFlowManager(order_client)
+
+    # Create node factory (holds order state)
+    node_factory = FlowNodeFactory(order_client)
 
     # Configure VAD
     vad_params = VADParams(
         start_secs=0.2,
-        stop_secs=0.2 if SMART_TURN_AVAILABLE else 0.8,
+        stop_secs=0.8,
         confidence=0.7,
         min_volume=0.6,
     )
     vad_analyzer = SileroVADAnalyzer(params=vad_params)
-
-    # Smart turn detection
-    turn_analyzer = None
-    if SMART_TURN_AVAILABLE:
-        try:
-            turn_analyzer = LocalSmartTurnAnalyzerV3()
-            logger.info("SmartTurnAnalyzer enabled")
-        except Exception as e:
-            logger.warning(f"SmartTurnAnalyzer not available: {e}")
 
     # Daily.co transport
     transport = DailyTransport(
@@ -509,7 +433,6 @@ async def main(room_url: str, token: str = None, session_id: str = None):
             transcription_enabled=False,
             vad_enabled=True,
             vad_analyzer=vad_analyzer,
-            turn_analyzer=turn_analyzer,
         ),
     )
 
@@ -531,57 +454,19 @@ async def main(room_url: str, token: str = None, session_id: str = None):
         model="eleven_turbo_v2",
     )
 
-    # Create FlowManager
-    flow_manager = FlowManager(
-        llm=llm,
-        tts=tts,
-    )
+    # Create context aggregator (required for new FlowManager API)
+    context = OpenAILLMContext()
+    context_aggregator = llm.create_context_aggregator(context)
 
-    # Register function handlers
-    @flow_manager.function_handler("set_order_type")
-    async def handle_set_order_type(args: FlowArgs):
-        return await order_manager.handle_set_order_type(args)
-
-    @flow_manager.function_handler("add_item")
-    async def handle_add_item(args: FlowArgs):
-        return await order_manager.handle_add_item(args)
-
-    @flow_manager.function_handler("get_menu")
-    async def handle_get_menu(args: FlowArgs):
-        return await order_manager.handle_get_menu(args)
-
-    @flow_manager.function_handler("complete_order_collection")
-    async def handle_complete_order_collection(args: FlowArgs):
-        return await order_manager.handle_complete_order_collection(args)
-
-    @flow_manager.function_handler("modify_order")
-    async def handle_modify_order(args: FlowArgs):
-        return await order_manager.handle_modify_order(args)
-
-    @flow_manager.function_handler("confirm_order")
-    async def handle_confirm_order(args: FlowArgs):
-        return await order_manager.handle_confirm_order(args)
-
-    @flow_manager.function_handler("set_customer_info")
-    async def handle_set_customer_info(args: FlowArgs):
-        return await order_manager.handle_set_customer_info(args)
-
-    @flow_manager.function_handler("end_call")
-    async def handle_end_call(args: FlowArgs):
-        result = await order_manager.handle_end_call(args)
-        # Queue end frame
-        await task.queue_frames([EndFrame()])
-        return result
-
-    # Build pipeline
+    # Build pipeline first (needed for FlowManager)
     pipeline = Pipeline([
         transport.input(),
         stt,
-        flow_manager.create_context_aggregator().user(),
+        context_aggregator.user(),
         llm,
         tts,
         transport.output(),
-        flow_manager.create_context_aggregator().assistant(),
+        context_aggregator.assistant(),
     ])
 
     task = PipelineTask(
@@ -594,6 +479,16 @@ async def main(room_url: str, token: str = None, session_id: str = None):
         ),
     )
 
+    # Create FlowManager with new API (requires task and context_aggregator)
+    flow_manager = FlowManager(
+        task=task,
+        llm=llm,
+        context_aggregator=context_aggregator,
+    )
+
+    # Give node factory references for ending calls
+    node_factory.set_refs(flow_manager, task)
+
     # Start with greeting when participant joins
     @transport.event_handler("on_participant_joined")
     async def on_participant_joined(transport, participant):
@@ -602,15 +497,13 @@ async def main(room_url: str, token: str = None, session_id: str = None):
 
         logger.info(f"Participant joined: {participant.get('id', 'unknown')}")
 
-        # Initialize flow manager and start greeting
-        await order_manager.initialize(flow_manager)
-        await flow_manager.initialize(create_greeting_node())
+        # Initialize flow manager with greeting node (handlers embedded in node)
+        await flow_manager.initialize(node_factory.create_greeting_node())
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
         logger.info(f"Participant left: {reason}")
         await task.queue_frames([EndFrame()])
-        await order_client.close()
 
     # Run pipeline
     runner = PipelineRunner()
