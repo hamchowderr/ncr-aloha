@@ -4,20 +4,15 @@ import { Button } from "@/components/ui/button";
 import { MenuItemCard } from "@/components/MenuItemCard";
 import { ItemConfigDialog } from "@/components/ItemConfigDialog";
 import { Cart } from "@/components/Cart";
-import { CallsPage } from "@/components/CallsPage";
-import { VoiceChat } from "@/components/VoiceChat";
 import { useMenu } from "@/hooks/useMenu";
 import { useCart } from "@/hooks/useCart";
 import type { MenuItem } from "@/types/menu";
-
-type Page = "menu" | "calls";
 
 function App() {
   const { menu, loading, error } = useMenu();
   const cart = useCart();
   const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
   const [activeCategory, setActiveCategory] = useState<string>("");
-  const [currentPage, setCurrentPage] = useState<Page>("menu");
 
   if (loading) {
     return (
@@ -49,20 +44,6 @@ function App() {
             <p className="text-primary-foreground/80">Voice Order Demo</p>
           </div>
           <nav className="flex gap-2 items-center">
-            <Button
-              variant={currentPage === "menu" ? "secondary" : "ghost"}
-              onClick={() => setCurrentPage("menu")}
-              className={currentPage !== "menu" ? "text-primary-foreground hover:text-primary-foreground hover:bg-primary-foreground/20" : ""}
-            >
-              Menu
-            </Button>
-            <Button
-              variant={currentPage === "calls" ? "secondary" : "ghost"}
-              onClick={() => setCurrentPage("calls")}
-              className={currentPage !== "calls" ? "text-primary-foreground hover:text-primary-foreground hover:bg-primary-foreground/20" : ""}
-            >
-              Voice Calls
-            </Button>
             <a
               href="https://github.com/hamchowderr/ncr-aloha"
               target="_blank"
@@ -88,10 +69,7 @@ function App() {
       </header>
 
       {/* Page Content */}
-      {currentPage === "calls" ? (
-        <CallsPage />
-      ) : (
-        <main className="max-w-7xl mx-auto p-4">
+      <main className="max-w-7xl mx-auto p-4">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Menu Section */}
             <div className="lg:col-span-2">
@@ -144,8 +122,7 @@ function App() {
               </div>
             </div>
           </div>
-        </main>
-      )}
+      </main>
 
       {/* Item Config Dialog */}
       <ItemConfigDialog
@@ -157,9 +134,6 @@ function App() {
           cart.addItem(item, size, modifiers, quantity);
         }}
       />
-
-      {/* Voice Chat Button */}
-      <VoiceChat />
     </div>
   );
 }
