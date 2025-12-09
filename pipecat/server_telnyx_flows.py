@@ -159,6 +159,29 @@ class FlowNodeFactory:
         self.task = task
         self.llm = llm
 
+    def _get_menu_text(self) -> str:
+        """Build menu text from cache for TTS."""
+        global CACHED_MENU
+        categories = CACHED_MENU.get("categories", []) if CACHED_MENU else []
+
+        if categories:
+            main_cats = [c for c in categories if c.lower() != "kids menu"]
+            has_kids = any(c.lower() == "kids menu" for c in categories)
+            if len(main_cats) > 1:
+                cat_text = ", ".join(main_cats[:-1]) + ", and " + main_cats[-1]
+            elif main_cats:
+                cat_text = main_cats[0]
+            else:
+                cat_text = "wings, ribs, burgers"
+            menu_text = f"We have {cat_text}."
+            if has_kids:
+                menu_text += " We also have a Kids Menu."
+            menu_text += " Our wings are the specialty, they come in one, two, three, or five pound sizes. What sounds good to you?"
+        else:
+            menu_text = "We have wings, ribs, burgers, fries, salads, hot dogs, and desserts. We also have a Kids Menu. Our wings come in one, two, three, or five pound sizes. What sounds good?"
+
+        return menu_text
+
     def create_greeting_node(self) -> NodeConfig:
         """Initial greeting node."""
         factory = self  # Capture reference for closure
@@ -168,31 +191,9 @@ class FlowNodeFactory:
             return ("Great! What would you like to order?", factory.create_order_collection_node())
 
         async def handle_get_menu(args: FlowArgs, flow_manager: FlowManager) -> tuple:
-            """Return cached menu categories formatted for voice."""
-            global CACHED_MENU
-            categories = CACHED_MENU.get("categories", []) if CACHED_MENU else []
-
-            # Format categories for natural speech - separate main items from Kids Menu
-            if categories:
-                # Filter out Kids Menu to mention separately
-                main_cats = [c for c in categories if c.lower() != "kids menu"]
-                has_kids_menu = any(c.lower() == "kids menu" for c in categories)
-
-                if len(main_cats) > 1:
-                    cat_text = ", ".join(main_cats[:-1]) + ", and " + main_cats[-1]
-                elif main_cats:
-                    cat_text = main_cats[0]
-                else:
-                    cat_text = "wings, ribs, burgers, and more"
-
-                menu_text = f"We have {cat_text}."
-                if has_kids_menu:
-                    menu_text += " We also have a Kids Menu as well."
-                menu_text += " Our wings are the specialty, they come in one, two, three, or five pound sizes. What sounds good to you?"
-            else:
-                menu_text = "We have wings, ribs, burgers, fries, salads, hot dogs, and desserts. We also have a Kids Menu as well. Our wings come in one, two, three, or five pound sizes. What sounds good?"
-
-            return (menu_text, None)
+            """Transition to menu_info node which speaks menu via tts_say."""
+            logger.info("Customer asked for menu - transitioning to menu_info node")
+            return ("Let me tell you what we have.", factory.create_menu_info_node())
 
         return {
             "name": "greeting",
@@ -222,6 +223,44 @@ class FlowNodeFactory:
             ],
         }
 
+    def create_menu_info_node(self) -> NodeConfig:
+        """Menu information node - speaks menu via tts_say."""
+        factory = self
+
+        async def handle_ready_to_order(args: FlowArgs, flow_manager: FlowManager) -> tuple:
+            logger.info("Customer ready to order after hearing menu")
+            return ("Great! What would you like?", factory.create_order_collection_node())
+
+        async def handle_repeat_menu(args: FlowArgs, flow_manager: FlowManager) -> tuple:
+            return ("Sure, let me repeat that.", factory.create_menu_info_node())
+
+        return {
+            "name": "menu_info",
+            "task_messages": [{
+                "role": "system",
+                "content": "You just told the customer about the menu. Wait for them to decide what to order."
+            }],
+            "pre_actions": [
+                {"type": "tts_say", "text": self._get_menu_text()}  # GUARANTEED to be spoken
+            ],
+            "functions": [
+                FlowsFunctionSchema(
+                    name="set_ready_to_order",
+                    description="Customer mentions a food item or says what they want",
+                    handler=handle_ready_to_order,
+                    properties={},
+                    required=[],
+                ),
+                FlowsFunctionSchema(
+                    name="repeat_menu",
+                    description="Customer asks to hear the menu again",
+                    handler=handle_repeat_menu,
+                    properties={},
+                    required=[],
+                ),
+            ],
+        }
+
     def create_order_collection_node(self) -> NodeConfig:
         """Order collection node."""
         factory = self  # Capture reference for closure
@@ -246,30 +285,9 @@ class FlowNodeFactory:
             return (f"Got it, {item_desc}. Anything else?", None)  # Stay in same node
 
         async def handle_get_menu(args: FlowArgs, flow_manager: FlowManager) -> tuple:
-            """Return cached menu categories formatted for voice."""
-            global CACHED_MENU
-            categories = CACHED_MENU.get("categories", []) if CACHED_MENU else []
-
-            if categories:
-                # Filter out Kids Menu to mention separately
-                main_cats = [c for c in categories if c.lower() != "kids menu"]
-                has_kids_menu = any(c.lower() == "kids menu" for c in categories)
-
-                if len(main_cats) > 1:
-                    cat_text = ", ".join(main_cats[:-1]) + ", and " + main_cats[-1]
-                elif main_cats:
-                    cat_text = main_cats[0]
-                else:
-                    cat_text = "wings, ribs, burgers, and more"
-
-                menu_text = f"We have {cat_text}."
-                if has_kids_menu:
-                    menu_text += " We also have a Kids Menu."
-                menu_text += " What can I get you?"
-            else:
-                menu_text = "We have wings, ribs, burgers, fries, salads, and more. What can I get you?"
-
-            return (menu_text, None)
+            """Transition to menu_info node which speaks menu via tts_say."""
+            logger.info("Customer asked for menu during ordering - transitioning to menu_info node")
+            return ("Let me tell you what we have.", factory.create_menu_info_node())
 
         async def handle_complete_order(args: FlowArgs, flow_manager: FlowManager) -> tuple:
             if not factory.items:
@@ -892,10 +910,12 @@ async def websocket_handler(websocket: WebSocket):
 
         # Create FlowManager with new API (requires task and context_aggregator)
         # Handlers are embedded in nodes via FlowsFunctionSchema
+        # tts is needed for pre_actions with type "tts_say"
         flow_manager = FlowManager(
             task=task,
             llm=llm,
             context_aggregator=context_aggregator,
+            tts=tts,
         )
 
         # Give node factory references for ending calls

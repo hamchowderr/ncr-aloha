@@ -480,10 +480,12 @@ async def main(room_url: str, token: str = None, session_id: str = None):
     )
 
     # Create FlowManager with new API (requires task and context_aggregator)
+    # tts is needed for pre_actions with type "tts_say"
     flow_manager = FlowManager(
         task=task,
         llm=llm,
         context_aggregator=context_aggregator,
+        tts=tts,
     )
 
     # Give node factory references for ending calls
