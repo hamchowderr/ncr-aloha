@@ -657,6 +657,49 @@ async def spawn_daily_bot(room_url: str, session_id: str):
         )
         bot_processes[session_id] = process
         logger.info(f"Spawned Daily Flows bot for session {session_id} (PID: {process.pid})")
+
+        # Start async task to log subprocess output
+        async def log_subprocess_output():
+            """Monitor subprocess output in background."""
+            import asyncio
+            while process.poll() is None:
+                # Read stdout/stderr without blocking
+                if process.stdout:
+                    try:
+                        line = process.stdout.readline()
+                        if line:
+                            logger.info(f"[Bot {session_id}] {line.decode().strip()}")
+                    except Exception:
+                        pass
+                if process.stderr:
+                    try:
+                        line = process.stderr.readline()
+                        if line:
+                            logger.error(f"[Bot {session_id}] {line.decode().strip()}")
+                    except Exception:
+                        pass
+                await asyncio.sleep(0.1)
+
+            # Log final exit code
+            exit_code = process.poll()
+            logger.info(f"[Bot {session_id}] Process exited with code {exit_code}")
+
+            # Capture any remaining output
+            if process.stdout:
+                remaining = process.stdout.read()
+                if remaining:
+                    for line in remaining.decode().strip().split('\n'):
+                        if line:
+                            logger.info(f"[Bot {session_id}] {line}")
+            if process.stderr:
+                remaining = process.stderr.read()
+                if remaining:
+                    for line in remaining.decode().strip().split('\n'):
+                        if line:
+                            logger.error(f"[Bot {session_id}] {line}")
+
+        asyncio.create_task(log_subprocess_output())
+
         return process.pid
     except Exception as e:
         logger.error(f"Failed to spawn Daily bot: {e}")

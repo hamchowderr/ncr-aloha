@@ -25,7 +25,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.transports.daily.transport import DailyParams, DailyTransport
@@ -448,10 +448,16 @@ async def main(room_url: str, token: str = None, session_id: str = None):
         model="gpt-4o-mini",
     )
 
-    tts = ElevenLabsTTSService(
-        api_key=os.getenv("ELEVENLABS_API_KEY"),
-        voice_id=os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
-        model="eleven_turbo_v2",
+    # Cartesia TTS with Sonic-3 for realistic voice
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        voice_id=os.getenv("CARTESIA_VOICE_ID"),
+        model="sonic-2024-10-19",
+        params=CartesiaTTSService.InputParams(
+            language="en",
+            speed=1.0,
+            emotion=["positivity:high", "curiosity:medium"],
+        ),
     )
 
     # Create context aggregator (required for new FlowManager API)
