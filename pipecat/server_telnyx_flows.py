@@ -84,27 +84,30 @@ bot_processes = {}
 
 ROLE_MESSAGE = {
     "role": "system",
-    "content": """You are a friendly, relaxed voice ordering assistant for Allstar Wings & Ribs restaurant in Richmond Hill.
+    "content": """You are Sam, a friendly phone order-taker at Allstar Wings and Ribs in Richmond Hill.
 
-CONVERSATION STYLE:
-- Speak naturally and warmly, like chatting with a regular customer
-- Use short, simple sentences. Pause between thoughts.
-- Don't rush. Take your time. Be patient.
-- Say "um" or "let me see" occasionally to sound human
-- Respond to what the customer says before moving on
-- If they seem confused, slow down and clarify
+# Voice Output Rules
+You are on a phone call. Your responses are spoken aloud via text-to-speech:
+- Plain text only. Never use markdown, asterisks, bullet points, or emojis.
+- Keep responses to one or two sentences. Ask one question at a time.
+- Spell out numbers naturally: say "two pounds" not "2 lbs".
+- Use contractions and casual speech: "What'll it be?" not "What will it be?"
 
-CRITICAL RULES:
-- NEVER use markdown formatting (no asterisks, no bold, no lists)
-- Wing sizes are in POUNDS (1, 2, 3, or 5 pounds)
-- NEVER mention other restaurants
-- Use get_menu tool when customers ask about items or prices
+# Personality
+- Warm, patient, and relaxed like talking to a regular customer.
+- Acknowledge what the customer says before moving on.
+- Use natural fillers occasionally: "let me see...", "alright...", "got it...".
+- If they seem unsure, slow down and offer suggestions.
 
-EXAMPLE NATURAL RESPONSES:
-- "Got it... two pounds of wings, honey garlic. Anything else?"
-- "Sure thing! And what flavor would you like on those?"
-- "Alright, let me make sure I have this right..."
-- "No problem! Take your time."""
+# Knowledge
+- Wings come in one, two, three, or five pound sizes.
+- Wing flavors: Honey Garlic, BBQ, Hot, Mild, Salt and Pepper, Lemon Pepper, Jerk, Suicide, Cajun.
+- You also have ribs, burgers, appetizers, fries, salads, and hot dogs.
+
+# Guardrails
+- Never mention competitors or other restaurants.
+- If asked something you dont know, say "Im not sure, let me focus on your order".
+- Stay on topic. Gently redirect off-topic conversations back to the order."""
 }
 
 
@@ -169,32 +172,22 @@ class FlowNodeFactory:
             "role_messages": [ROLE_MESSAGE],
             "task_messages": [{
                 "role": "system",
-                "content": """The customer just called. This is a pickup order.
-
-WAIT for the greeting to finish, then listen to what they say.
-
-If they ask about the menu, use get_menu to fetch it.
-If they ask about flavors, tell them: Honey Garlic, BBQ, Hot, Mild, Salt and Pepper, Lemon Pepper, Jerk, Suicide, and Cajun.
-If they ask about sizes, wings come in: 1 pound, 2 pounds, 3 pounds, or 5 pounds.
-
-When they say what they want to order, use set_ready_to_order to proceed.
-
-Remember: Be patient, don't rush them."""
+                "content": """This is a pickup order. Listen to what the customer wants, then proceed."""
             }],
             "pre_actions": [
-                {"type": "tts_say", "text": "Hi there! Thanks for calling Allstar Wings and Ribs. What can I get for you?"}
+                {"type": "tts_say", "text": "Hi, thanks for calling Allstar Wings and Ribs! What can I get for you today?"}
             ],
             "functions": [
                 FlowsFunctionSchema(
                     name="set_ready_to_order",
-                    description="Customer mentions what they want to order or is ready to order",
+                    description="Call this when the customer mentions ANY food item they want to order, says they want to place an order, or tells you what they'd like. Trigger words: wings, ribs, burger, fries, order, hungry, want, get, have.",
                     handler=handle_ready_to_order,
                     properties={},
                     required=[],
                 ),
                 FlowsFunctionSchema(
                     name="get_menu",
-                    description="Get the full menu with items and prices. Use when customer asks what's on the menu or asks about prices.",
+                    description="Call this when the customer asks about the menu, what you have, what's available, prices, or says they're not sure what to order. Trigger words: menu, prices, what do you have, options, specials.",
                     handler=handle_get_menu,
                     properties={},
                     required=[],
@@ -258,52 +251,44 @@ Remember: Be patient, don't rush them."""
             "role_messages": [ROLE_MESSAGE],
             "task_messages": [{
                 "role": "system",
-                "content": """Help the customer build their order. Use get_menu if they ask about menu items or prices.
-
-ORDERING GUIDELINES:
-- For wings: Ask what SIZE in pounds (1, 2, 3, or 5 pounds) and what FLAVOR they want
-- Wing flavors: Honey Garlic, BBQ, Hot, Mild, Salt and Pepper, Lemon Pepper, Jerk, Suicide, Cajun
-- Confirm each item back naturally after adding
-- When they say "that's it", "that's all", or "no" to "anything else?", use complete_order
-
-IMPORTANT: Speak naturally, no markdown or special formatting."""
+                "content": """Take the customers order. For wings, confirm size and flavor. After each item, ask "Anything else?" When they're done, move to confirmation."""
             }],
             "functions": [
                 FlowsFunctionSchema(
                     name="add_item",
-                    description="Add an item to the order",
+                    description="Call this EVERY TIME the customer orders a food item. Use for wings, ribs, burgers, fries, drinks, or any menu item. Extract the item name, quantity, size (for wings: one pound, two pounds, three pounds, or five pounds), and any flavor or modification.",
                     handler=handle_add_item,
                     properties={
                         "item_name": {
                             "type": "string",
-                            "description": "Menu item name"
+                            "description": "The menu item being ordered: wings, ribs, burger, fries, etc."
                         },
                         "quantity": {
                             "type": "integer",
-                            "description": "Number of this item"
+                            "description": "How many of this item. Default is 1."
                         },
                         "size": {
                             "type": "string",
-                            "description": "Size for wings (1 lb, 2 lb, 3 lb, 5 lb)"
+                            "description": "Size for wings only. Must be: one pound, two pounds, three pounds, or five pounds."
                         },
                         "modifiers": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "description": "Flavors or modifications"
+                            "description": "Flavors like honey garlic, BBQ, hot, mild, jerk, cajun, or other modifications."
                         }
                     },
                     required=["item_name"],
                 ),
                 FlowsFunctionSchema(
                     name="get_menu",
-                    description="Get full menu with items and prices. Use when customer asks about menu or prices.",
+                    description="Call this when customer asks what's on the menu, asks about prices, or wants to know their options. Trigger: menu, prices, what do you have, options.",
                     handler=handle_get_menu,
                     properties={},
                     required=[],
                 ),
                 FlowsFunctionSchema(
                     name="complete_order",
-                    description="Customer is done adding items",
+                    description="Call this when the customer is DONE ordering and doesn't want anything else. Trigger phrases: that's it, that's all, no thanks, nothing else, I'm good, that's everything, no more.",
                     handler=handle_complete_order,
                     properties={},
                     required=[],
@@ -332,27 +317,20 @@ IMPORTANT: Speak naturally, no markdown or special formatting."""
             "role_messages": [ROLE_MESSAGE],
             "task_messages": [{
                 "role": "system",
-                "content": f"""Read back the order and ask customer to confirm:
-
-ORDER:
-{items_text}
-
-Say something like: "Let me read that back: [items]. Does that sound right?"
-
-If they want to change something, use modify_order.
-If they confirm, use confirm_order."""
+                "content": f"""Read back this order naturally and ask if it sounds right:
+{items_text}"""
             }],
             "functions": [
                 FlowsFunctionSchema(
                     name="modify_order",
-                    description="Go back to modify the order",
+                    description="Call this if the customer wants to CHANGE something, add more items, or remove something. Trigger: change, remove, add, actually, wait, no that's wrong, correction.",
                     handler=handle_modify_order,
                     properties={},
                     required=[],
                 ),
                 FlowsFunctionSchema(
                     name="confirm_order",
-                    description="Customer confirmed order",
+                    description="Call this when the customer CONFIRMS the order is correct. Trigger: yes, yeah, correct, that's right, sounds good, perfect, yep.",
                     handler=handle_confirm_order,
                     properties={},
                     required=[],
@@ -417,23 +395,16 @@ If they confirm, use confirm_order."""
             "role_messages": [ROLE_MESSAGE],
             "task_messages": [{
                 "role": "system",
-                "content": """Collect the customer's name and phone number for the order.
-
-Ask: "Can I get a name for the order?"
-Then: "And what's your phone number?"
-
-Read back the phone number to confirm it's correct.
-
-When you have both name and phone, use set_customer_info to submit."""
+                "content": """Get the customers name first, then their phone number. Read back the phone number to confirm."""
             }],
             "functions": [
                 FlowsFunctionSchema(
                     name="set_customer_info",
-                    description="Record customer name and phone, submit order",
+                    description="Call this ONLY after you have collected BOTH the customers name AND phone number. You must have asked for and received both pieces of information before calling this function.",
                     handler=handle_set_customer_info,
                     properties={
-                        "name": {"type": "string", "description": "Customer's name"},
-                        "phone": {"type": "string", "description": "Customer's phone number"}
+                        "name": {"type": "string", "description": "The customers first name for the order."},
+                        "phone": {"type": "string", "description": "The customers phone number, formatted as digits like 4165551234."}
                     },
                     required=["name", "phone"],
                 )
@@ -447,17 +418,10 @@ When you have both name and phone, use set_customer_info to submit."""
         order_id = self.order_result.get("orderId", "")[:8] if self.order_result and self.order_result.get("orderId") else ""
 
         if success:
-            message = f"""Order placed successfully! Order number: {order_id}
-
-Thank the customer and tell them:
-"Your order will be ready in about 15-20 minutes for pickup. Thanks for calling Allstar Wings!"
-
-Then use end_call to finish."""
+            message = f"""Order placed! Order number is {order_id}. Tell them it will be ready in fifteen to twenty minutes, thank them, and say goodbye."""
         else:
             errors = ", ".join(self.order_result.get("errors", ["Unknown error"])) if self.order_result else "Unknown error"
-            message = f"""There was a problem with the order: {errors}
-
-Apologize and offer to try again. If they want to cancel, use end_call."""
+            message = f"""There was a problem: {errors}. Apologize briefly and end the call."""
 
         async def handle_end_call(args: FlowArgs, flow_manager: FlowManager) -> tuple:
             logger.info("End call requested")
@@ -480,7 +444,7 @@ Apologize and offer to try again. If they want to cancel, use end_call."""
             "functions": [
                 FlowsFunctionSchema(
                     name="end_call",
-                    description="End the call after saying goodbye",
+                    description="Call this to hang up AFTER you have thanked the customer and said goodbye. This ends the phone call.",
                     handler=handle_end_call,
                     properties={},
                     required=[],
