@@ -105,6 +105,9 @@ src/
 ## Environment Variables
 
 ### Backend (`.env`)
+
+Get free test API keys (valid for 30 days) from the [NCR Voyix Developer Portal](https://developer.ncrvoyix.com/portals/dev-portal/api-explorer).
+
 ```
 NCR_API_GATEWAY=https://api.ncr.com
 NCR_ORGANIZATION=<org-id>
