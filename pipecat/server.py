@@ -70,9 +70,10 @@ async def create_daily_room() -> dict:
         return response.json()
 
 
-async def spawn_bot(room_url: str, session_id: str, use_flows: bool = False):
+async def spawn_bot(room_url: str, session_id: str, use_flows: bool = True):
     """Spawn a bot process for the given room."""
-    bot_script = "bot_flows.py" if use_flows else "bot.py"
+    # Always use the Flows-based bot for consistent behavior
+    bot_script = "bot_flows.py"
     script_path = os.path.join(os.path.dirname(__file__), bot_script)
 
     # Check if we're in WSL or Linux (Daily.co requires it)
@@ -150,8 +151,7 @@ async def handle_start_session(request: web.Request) -> web.Response:
 
         # Add instructions if bot not spawned
         if not bot_pid:
-            bot_script = "bot_flows.py" if use_flows else "bot.py"
-            response_data["instructions"] = f"Bot not auto-spawned. Run manually: python {bot_script} {room_url}"
+            response_data["instructions"] = f"Bot not auto-spawned. Run manually: python bot_flows.py {room_url}"
             if sys.platform == "win32":
                 response_data["note"] = "Daily.co requires Linux/macOS. Use WSL on Windows."
 

@@ -2,7 +2,7 @@
 Create a Daily.co room for voice calls.
 
 This creates a temporary room that expires after 1 hour.
-Run this to get a room URL, then use it with bot.py.
+Run this to get a room URL, then use it with bot_flows.py.
 """
 
 import os
@@ -51,7 +51,7 @@ def create_room():
     print(f"  Name: {room_name}")
     print(f"  URL:  {room_url}")
     print(f"\nTo start the bot:")
-    print(f"  python bot.py {room_url}")
+    print(f"  python bot_flows.py {room_url}")
     print(f"\nTo join as a caller:")
     print(f"  Open {room_url} in your browser")
 

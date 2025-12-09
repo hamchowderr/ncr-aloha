@@ -143,10 +143,11 @@ Python-based voice AI that connects to the TypeScript API.
 
 | Bot | Transport | Conversation Style | File |
 |-----|-----------|-------------------|------|
-| Standard | Daily.co WebRTC | Free-form | `bot.py` |
-| Flows | Daily.co WebRTC | Structured states | `bot_flows.py` |
-| Telnyx | VOIP/SIP | Free-form | `server_telnyx.py` |
-| Telnyx Flows | VOIP/SIP | Structured states | `server_telnyx_flows.py` |
+| Daily.co | WebRTC (browser) | Structured states | `bot_flows.py` |
+| Telnyx | VOIP/SIP (phone) | Structured states | `server_telnyx_flows.py` |
+
+All bots use the Flows architecture with enforced conversation states:
+`greeting → order_collection → order_confirmation → customer_info → completion`
 
 ### Setup
 
@@ -174,10 +175,10 @@ python test_order.py
 
 # Daily.co WebRTC bot
 python create_room.py        # Get room URL
-python bot.py <room_url>
+python bot_flows.py <room_url>
 
 # Telnyx VOIP (real phone calls)
-python server_telnyx.py
+python server_telnyx_flows.py
 
 # HTTP server for session management
 python server.py             # Runs on port 8765
@@ -186,11 +187,8 @@ python server.py             # Runs on port 8765
 ### Server API
 
 ```bash
-# Create session (standard bot)
+# Create session
 curl -X POST http://localhost:8765/sessions
-
-# Create session (Flows bot)
-curl -X POST "http://localhost:8765/sessions?use_flows=true"
 
 # Get session status
 curl http://localhost:8765/sessions/{session_id}

@@ -18,7 +18,5 @@ COPY *.py ./
 
 EXPOSE 8765
 
-# USE_FLOWS=true to use structured conversation flow, false for free-form
-ENV USE_FLOWS=false
-
-CMD ["sh", "-c", "if [ \"$USE_FLOWS\" = 'true' ]; then python server_telnyx_flows.py; else python server_telnyx.py; fi"]
+# Run the Flows-based server (enforces conversation workflow)
+CMD ["python", "server_telnyx_flows.py"]

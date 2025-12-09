@@ -75,7 +75,7 @@ python create_room.py
 
 3. Start the bot with the room URL:
 ```bash
-python bot.py https://your-domain.daily.co/room-name
+python bot_flows.py https://your-domain.daily.co/room-name
 ```
 
 4. Open the room URL in your browser and start talking!
@@ -96,7 +96,8 @@ curl -X POST http://localhost:8765/sessions
 
 ## Files
 
-- `bot.py` - Main Pipecat pipeline (STT → LLM → TTS) - requires Linux/Mac
+- `bot_flows.py` - Pipecat pipeline with structured conversation flow (requires Linux/Mac)
+- `server_telnyx_flows.py` - Telnyx VOIP server with enforced workflow states
 - `test_order.py` - Text-based test script for Windows development
 - `order_assistant.py` - Order extraction logic with function calling
 - `order_client.py` - HTTP client for the TypeScript order API
