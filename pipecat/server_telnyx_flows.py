@@ -144,35 +144,25 @@ class FlowNodeFactory:
             return ("Great! What would you like to order?", factory.create_order_collection_node())
 
         async def handle_get_menu(args: FlowArgs, flow_manager: FlowManager) -> tuple:
-            """Fetch menu from API and return formatted for voice."""
-            try:
-                menu = await factory.order_client.get_menu()
-                items_by_category = {}
-                for item in menu.get("items", []):
-                    cat = item.get("category", "Other")
-                    if cat not in items_by_category:
-                        items_by_category[cat] = []
-                    items_by_category[cat].append(item)
+            """Return simplified menu for voice - LLM will speak it."""
+            # Keep it short for voice - just categories and highlights
+            menu_text = """Alright, let me tell you what we got...
 
-                # Format for voice - no markdown!
-                result = ["Here's what we have:"]
-                for category, items in items_by_category.items():
-                    result.append(f"For {category}:")
-                    item_names = [item['name'] for item in items[:5]]
-                    result.append(", ".join(item_names) + ".")
+For wings, we have Original Wings, Boneless Bites, and more. Wings come in one, two, three, or five pound sizes with flavors like Honey Garlic, BBQ, Hot, Mild, Lemon Pepper, Jerk, and Cajun.
 
-                return (" ".join(result) + " What sounds good to you?", None)
-            except Exception as e:
-                logger.error(f"Failed to fetch menu: {e}")
-                # Fallback to basic menu info
-                return ("We have wings, ribs, burgers, appetizers, fries, salads, hot dogs, and more. Our wings are our specialty - they come in one pound, two pounds, three pounds, or five pounds with lots of flavor options. What would you like?", None)
+For ribs, we have Pork Side Ribs and Baby Back Ribs, half or full rack.
+
+We also have burgers, fries, salads, hot dogs, and desserts.
+
+What sounds good to you?"""
+            return (menu_text, None)
 
         return {
             "name": "greeting",
             "role_messages": [ROLE_MESSAGE],
             "task_messages": [{
                 "role": "system",
-                "content": """This is a pickup order. Listen to what the customer wants, then proceed."""
+                "content": """This is a pickup order. When get_menu is called, READ the full menu result to the customer word for word - do not summarize it."""
             }],
             "pre_actions": [
                 {"type": "tts_say", "text": "Hi, thanks for calling Allstar Wings and Ribs! What can I get for you today?"}
@@ -187,7 +177,7 @@ class FlowNodeFactory:
                 ),
                 FlowsFunctionSchema(
                     name="get_menu",
-                    description="Call this when the customer asks about the menu, what you have, what's available, prices, or says they're not sure what to order. Trigger words: menu, prices, what do you have, options, specials.",
+                    description="Call this when the customer asks about the menu, what you have, what's available, or says they're not sure what to order. Say 'let me tell you what we have' before calling. Trigger words: menu, what do you have, options.",
                     handler=handle_get_menu,
                     properties={},
                     required=[],
@@ -219,27 +209,9 @@ class FlowNodeFactory:
             return (f"Got it, {item_desc}. Anything else?", None)  # Stay in same node
 
         async def handle_get_menu(args: FlowArgs, flow_manager: FlowManager) -> tuple:
-            """Fetch menu from API and return formatted for voice."""
-            try:
-                menu = await factory.order_client.get_menu()
-                items_by_category = {}
-                for item in menu.get("items", []):
-                    cat = item.get("category", "Other")
-                    if cat not in items_by_category:
-                        items_by_category[cat] = []
-                    items_by_category[cat].append(item)
-
-                # Format for voice - no markdown!
-                result = ["Here's what we have:"]
-                for category, items in items_by_category.items():
-                    result.append(f"For {category}:")
-                    item_names = [item['name'] for item in items[:5]]
-                    result.append(", ".join(item_names) + ".")
-
-                return (" ".join(result) + " What would you like?", None)
-            except Exception as e:
-                logger.error(f"Failed to fetch menu: {e}")
-                return ("We have wings, ribs, burgers, appetizers, fries, salads, hot dogs, and more. What would you like?", None)
+            """Return simplified menu for voice."""
+            menu_text = """Sure thing... We have wings in one, two, three, or five pound sizes with flavors like Honey Garlic, BBQ, Hot, Mild, Lemon Pepper, Jerk, and Cajun. We also have ribs, burgers, fries, salads, and hot dogs. What can I get you?"""
+            return (menu_text, None)
 
         async def handle_complete_order(args: FlowArgs, flow_manager: FlowManager) -> tuple:
             if not factory.items:
@@ -773,7 +745,6 @@ async def websocket_handler(websocket: WebSocket):
             sample_rate=8000,
             params=CartesiaTTSService.InputParams(
                 speed="slow",  # Slower for clarity on phone
-                emotion=["positivity:high"],  # Warm, friendly tone
             ),
         )
 
