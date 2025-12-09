@@ -772,7 +772,7 @@ async def websocket_handler(websocket: WebSocket):
             model="sonic-3",
             sample_rate=8000,
             params=CartesiaTTSService.InputParams(
-                speed=0.95,  # Slightly slower for clarity on phone
+                speed="slow",  # Slower for clarity on phone
                 emotion=["positivity:high"],  # Warm, friendly tone
             ),
         )
