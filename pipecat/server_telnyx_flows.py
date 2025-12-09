@@ -373,6 +373,11 @@ class FlowNodeFactory:
         factory = self  # Capture reference for closure
 
         async def handle_set_customer_info(args: FlowArgs, flow_manager: FlowManager) -> tuple:
+            # Guard against duplicate submissions (LLM sometimes calls this twice)
+            if factory.order_result is not None:
+                logger.warning("Order already submitted, ignoring duplicate call")
+                return ("Order already submitted.", None)
+
             factory.customer_name = args.get("name", "")
             factory.customer_phone = args.get("phone", "")
 
@@ -795,6 +800,18 @@ async def websocket_handler(websocket: WebSocket):
             api_key=os.getenv("DEEPGRAM_API_KEY"),
             model="nova-2-phonecall",
             language="en-US",
+            keywords=[
+                # Menu items for better recognition
+                "wings:2", "ribs:2", "burger:2", "burgers:2", "fries:2",
+                "salad:2", "salads:2", "hot dog:2", "hot dogs:2",
+                # Flavors
+                "honey garlic:2", "BBQ:2", "lemon pepper:2", "jerk:2",
+                "cajun:2", "mild:2", "hot:2", "suicide:2",
+                # Sizes
+                "one pound:2", "two pounds:2", "three pounds:2", "five pounds:2",
+                # Common words
+                "menu:3", "order:2", "pickup:2",
+            ],
         )
 
         # Cartesia TTS with Sonic-3 for realistic voice
