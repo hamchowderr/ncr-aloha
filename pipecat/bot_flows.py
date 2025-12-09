@@ -471,7 +471,7 @@ async def main(room_url: str, token: str = None, session_id: str = None):
 
     task = PipelineTask(
         pipeline,
-        PipelineParams(
+        params=PipelineParams(
             allow_interruptions=True,
             enable_metrics=True,
             idle_timeout_secs=300,
