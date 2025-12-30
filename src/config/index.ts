@@ -10,6 +10,9 @@ export const config = {
     sharedKey: process.env.NCR_SHARED_KEY || "",
     secretKey: process.env.NCR_SECRET_KEY || "",
   },
+  admin: {
+    apiKey: process.env.ADMIN_API_KEY || "",
+  },
   services: {
     order: "/order/3/orders/1",
     catalog: "/catalog/v2",
