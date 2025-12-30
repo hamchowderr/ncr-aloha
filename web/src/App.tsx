@@ -44,6 +44,14 @@ function App() {
             <p className="text-primary-foreground/80">Voice Order Demo</p>
           </div>
           <nav className="flex gap-2 items-center">
+            <a href="/admin">
+              <Button
+                variant="ghost"
+                className="text-primary-foreground hover:text-primary-foreground hover:bg-primary-foreground/20"
+              >
+                Admin
+              </Button>
+            </a>
             <a
               href="https://github.com/hamchowderr/ncr-aloha"
               target="_blank"

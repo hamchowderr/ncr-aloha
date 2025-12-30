@@ -4,107 +4,131 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-NCR Aloha Voice Ordering Integration - bridges voice AI systems (Pipecat) with NCR Aloha POS via BSP APIs. Enables voice-based food ordering via phone (Telnyx) or browser (Daily.co WebRTC).
+NCR Aloha Voice Ordering Integration - bridges voice AI (Pipecat) with NCR Aloha POS via BSP APIs. Enables voice-based food ordering via phone calls (Telnyx VOIP).
 
 ## Commands
 
-### Backend (TypeScript/Express)
+### Backend (TypeScript/Express - port 3000)
 ```bash
 npm install              # Install dependencies
-npm run dev              # Development with hot reload (tsx watch)
+npm run dev              # Development with hot reload
 npm run server           # Start server once
-npm run build            # Compile to dist/
-npm start                # Run compiled code
+npm run build            # Compile TypeScript
 npm run test:api         # Test API endpoints
 ```
 
-### Frontend (React/Vite)
+### Frontend (React/Vite - port 5173)
 ```bash
 cd web
 npm install
-npm run dev              # Dev server on :5173
-npm run build            # Production build
+npm run dev              # Dev server
+npm run build            # Production build to dist/
 npm run lint             # ESLint
 ```
 
-### Voice Bot (Python/Pipecat)
+### Voice Bot (Python/Pipecat - port 8765)
 ```bash
 cd pipecat
-python -m venv venv && source venv/bin/activate  # or venv\Scripts\activate on Windows
+python -m venv venv && source venv/bin/activate  # Linux/Mac
+# or: python -m venv venv && venv\Scripts\activate  # Windows
 pip install -r requirements.txt
 pip install 'pipecat-ai[daily,openai,deepgram,cartesia,silero]' pipecat-ai-flows
 
-python test_order.py              # Text-based testing (Windows compatible)
-python server_telnyx_flows.py     # Telnyx VOIP server (port 8765)
-python bot_flows.py <room_url>    # Daily.co WebRTC bot
+python test_order.py              # Text-based testing
+python server_telnyx_flows.py     # Telnyx VOIP server
 ```
 
 ### Docker
 ```bash
-docker compose up -d --build              # Start all services
-docker compose build pipecat && docker compose up -d pipecat  # Rebuild single service
-docker logs ncr-pipecat -f                # View logs
-```
-
-### Run Full Stack Locally
-```bash
-# Terminal 1: Backend on :3000
-npm run server
-
-# Terminal 2: Frontend on :5173
-cd web && npm run dev
+docker compose up -d --build                                    # Start all
+docker compose build pipecat && docker compose up -d pipecat    # Rebuild pipecat
+docker logs ncr-pipecat -f                                      # View logs
+docker logs ncr-backend -f
 ```
 
 ## Architecture
 
-### Three-Service Architecture
-1. **Backend** (`src/`, port 3000): Express API handling orders, menu, call metrics
-2. **Frontend** (`web/`, port 5173): React UI with voice chat button
-3. **Voice Bot** (`pipecat/`, port 8765): Python Pipecat handling phone/browser calls
+### Services
+1. **Backend** (`src/`, port 3000): Express API - orders, menu, NCR integration
+2. **Frontend** (`web/`, port 5173 dev): React menu UI with cart
+3. **Voice Bot** (`pipecat/`, port 8765): Python Pipecat handling phone calls via Telnyx
 
-### Data Flow
+### Voice Call Flow
 ```
-Phone/Browser → Pipecat Bot → POST /orders → NCR Aloha API
-                    ↓
-         Deepgram STT → GPT-4o → Cartesia TTS
+Phone Call → Telnyx → WebSocket → Pipecat Bot → POST /orders → NCR API
+                                      ↓
+                           Deepgram STT → GPT-4o → Cartesia TTS
 ```
 
-### Voice Conversation Flow (Pipecat Flows)
+### Order Processing Pipeline
+1. Voice AI produces a `VoiceOrder` (customer info, items with spoken names)
+2. `MenuMatcher` fuzzy-matches spoken items to actual menu items
+3. `OrderBuilder` converts to NCR `CreateOrderRequest` format
+4. `OrderService.submitOrder()` sends to NCR API
+
+### Conversation State Machine (Pipecat Flows)
 ```
 greeting → order_collection → order_confirmation → customer_info → completion
 ```
 
-### Key Backend Files
-- `src/server.ts` - Express endpoints (/menu, /orders, /calls)
+### Key Files
+**Backend:**
+- `src/server.ts` - Express endpoints (/menu, /orders, /health, /calls)
+- `src/routes/admin.ts` - Admin API routes (protected by X-API-Key header)
+- `src/middleware/api-key.ts` - API key authentication middleware
 - `src/auth/hmac.ts` - HMAC-SHA512 signing for NCR APIs
-- `src/services/order-service.ts` - Order processing orchestration
+- `src/services/order-service.ts` - Order processing
 - `src/services/menu-matcher.ts` - Fuzzy matching spoken items to menu
+- `src/data/allstar-menu.ts` - Menu data
 
-### Key Pipecat Files
+**Pipecat:**
 - `pipecat/server_telnyx_flows.py` - Main Telnyx VOIP server with Flows state machine
-- `pipecat/bot_flows.py` - Daily.co WebRTC bot (browser voice calls)
 - `pipecat/order_client.py` - HTTP client to TypeScript backend
 
-## API Patterns
+**Frontend:**
+- `web/src/router.tsx` - React Router configuration
+- `web/src/App.tsx` - Customer-facing menu UI with cart
+- `web/src/layouts/AdminLayout.tsx` - Admin dashboard layout
+- `web/src/pages/admin/` - Admin pages (Dashboard, Sites, Orders, Menu)
+- `web/src/hooks/useMenu.ts`, `useCart.ts`, `useOrders.ts`, `useSites.ts`
 
-### NCR Authentication
-All NCR API requests require HMAC-SHA512 signed headers generated by `src/auth/hmac.ts`.
+### API Routes
 
-### VoiceOrder → NCR Order Conversion
-```typescript
-// Voice bot sends this:
-{ orderType: "pickup", items: [{itemName: "wings", size: "2 pounds", modifiers: ["honey garlic"]}], customer: {name, phone} }
-
-// Backend converts to NCR format via OrderBuilder
+**Public:**
+```
+GET  /health              - Health check
+GET  /menu                - Full menu
+POST /orders              - Submit order
+GET  /orders/:orderId     - Get order status
+POST /calls               - Submit call metrics (from Pipecat)
+GET  /calls               - Get call history with summary stats
 ```
 
-### Pipecat Flows API (Current Pattern)
+**Admin (requires X-API-Key header):**
+```
+GET  /admin/sites              - List sites
+GET  /admin/orders             - List orders
+GET  /admin/orders/:orderId    - Get order details
+POST /admin/orders/:orderId/acknowledge - Acknowledge order
+PATCH /admin/orders/:orderId   - Update order status
+POST/PUT/DELETE /admin/menu/*  - Menu CRUD operations
+```
+
+### Frontend Routes
+- `/` - Customer menu UI with cart
+- `/admin` - Admin dashboard
+- `/admin/sites` - Site management
+- `/admin/menu` - Menu management
+- `/admin/orders` - Order list
+- `/admin/orders/:orderId` - Order details
+
+## Pipecat Flows API Pattern
 ```python
 # FlowManager requires task and context_aggregator
 context = OpenAILLMContext()
 context_aggregator = llm.create_context_aggregator(context)
 task = PipelineTask(pipeline, params=PipelineParams(...))
-flow_manager = FlowManager(task=task, llm=llm, context_aggregator=context_aggregator)
+flow_manager = FlowManager(task=task, llm=llm, context_aggregator=context_aggregator, tts=tts)
 
 # Handlers embedded in nodes via FlowsFunctionSchema
 FlowsFunctionSchema(name="add_item", handler=async_handler, properties={...})
@@ -112,23 +136,37 @@ FlowsFunctionSchema(name="add_item", handler=async_handler, properties={...})
 
 ## Environment Variables
 
-### Backend (.env)
+### Backend (.env.production for Docker)
 ```
 NCR_API_GATEWAY, NCR_ORGANIZATION, NCR_SITE_ID, NCR_SHARED_KEY, NCR_SECRET_KEY
+ADMIN_API_KEY  # Required for /admin/* routes in production
 ```
 
-### Pipecat (pipecat/.env)
+### Pipecat (pipecat/.env.production for Docker)
 ```
-DAILY_API_KEY, TELNYX_API_KEY, DEEPGRAM_API_KEY, OPENAI_API_KEY, CARTESIA_API_KEY, CARTESIA_VOICE_ID
-ORDER_API_URL=http://localhost:3000
-PUBLIC_URL=https://your-domain.com  # Required for Telnyx
+TELNYX_API_KEY, DEEPGRAM_API_KEY, OPENAI_API_KEY, CARTESIA_API_KEY, CARTESIA_VOICE_ID
+ORDER_API_URL=http://backend:3000  # Use Docker service name
+PUBLIC_URL=https://your-domain.com  # Required for Telnyx WebSocket URL
 ```
 
 ## Deployment
 
-Production runs on VPS at `/var/www/ncr-aloha` with Docker Compose:
-- Backend: `ncr-backend` container (port 3000)
-- Pipecat: `ncr-pipecat` container (port 8765)
-- Nginx reverse proxy routes `/api/` → backend, `/ws` → pipecat
+Production runs on VPS at `/var/www/ncr-aloha`:
+- Nginx serves frontend static files from `web/dist/`
+- Nginx proxies: `/menu`, `/health` → backend:3000; `/admin/*` → backend:3000; `/ws`, `/texml` → pipecat:8765
+- Docker containers: `ncr-backend` (port 3000), `ncr-pipecat` (port 8765)
 
-Deploy with: `cd /var/www/ncr-aloha && git pull && docker compose build && docker compose up -d`
+Deploy:
+```bash
+cd /var/www/ncr-aloha
+git pull origin master
+cd web && npm install && npm run build  # Rebuild frontend
+docker compose build && docker compose up -d --force-recreate
+```
+
+## NCR API Authentication
+
+All NCR API requests use HMAC-SHA512 signed headers:
+- Signature input: `METHOD\nPATH\nCONTENT-TYPE\nCONTENT-MD5\nORGANIZATION`
+- Signing key: `secretKey + ISO timestamp`
+- Header: `Authorization: AccessKey {sharedKey}:{base64Signature}`

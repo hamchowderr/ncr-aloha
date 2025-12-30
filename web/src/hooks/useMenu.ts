@@ -1,29 +1,15 @@
-import { useState, useEffect } from "react";
-import type { Menu } from "@/types/menu";
+import { useQuery } from "@tanstack/react-query";
+import { menuApi, type Menu } from "@/lib/api";
 
 export function useMenu() {
-  const [menu, setMenu] = useState<Menu | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data: menu, isLoading: loading, error } = useQuery<Menu, Error>({
+    queryKey: ["menu"],
+    queryFn: menuApi.getMenu,
+  });
 
-  useEffect(() => {
-    async function fetchMenu() {
-      try {
-        // In production, call the API directly. In dev, use local proxy.
-        const apiUrl = import.meta.env.DEV ? "" : "https://ncr-aloha.tylanmiller.tech";
-        const res = await fetch(`${apiUrl}/menu`);
-        if (!res.ok) throw new Error("Failed to fetch menu");
-        const data = await res.json();
-        setMenu(data);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Unknown error");
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    fetchMenu();
-  }, []);
-
-  return { menu, loading, error };
+  return {
+    menu: menu ?? null,
+    loading,
+    error: error?.message ?? null,
+  };
 }
