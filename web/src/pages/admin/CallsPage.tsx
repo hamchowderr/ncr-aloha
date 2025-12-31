@@ -26,11 +26,11 @@ import type { CallMetrics } from "@/lib/api";
 const volumeChartConfig = {
   successful: {
     label: "Successful",
-    color: "hsl(var(--chart-2))",
+    color: "oklch(0.6 0.2 145)",
   },
   failed: {
     label: "No Order",
-    color: "hsl(var(--chart-5))",
+    color: "oklch(0.65 0.2 25)",
   },
 } satisfies ChartConfig;
 
