@@ -17,7 +17,7 @@ interface OrdersChartProps {
 const chartConfig = {
   orders: {
     label: "Orders",
-    color: "hsl(var(--chart-1))",
+    color: "oklch(0.646 0.222 41.116)",
   },
 } satisfies ChartConfig;
 
